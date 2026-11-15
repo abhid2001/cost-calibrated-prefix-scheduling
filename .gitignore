@@ -1,0 +1,29 @@
+# Local Python environment and caches
+.venv/
+.cache/
+tmp/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated data and experiment results; keep the dataset manifest
+/data/*.jsonl
+/results/
+/configs/installed-requirements.txt
+
+# Slurm output and local secrets
+/slurm-*.out
+/foundation-*.out
+/pilot-*.out
+/reasoning-*.out
+/matrix-*.out
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local project planning document
+/Prefix_Scheduler_Implementation_and_Objectives.docx

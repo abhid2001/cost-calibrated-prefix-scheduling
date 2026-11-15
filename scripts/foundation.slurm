@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=prefix-foundation
+#SBATCH --partition=aa100
+#SBATCH --qos=gpu-normal
+#SBATCH --gres=gpu:a100-40gb:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=48G
+#SBATCH --time=02:00:00
+#SBATCH --output=foundation-%j.out
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:?Submit from the scheduler directory}"
+export HF_HOME="$PWD/.cache/huggingface"
+mkdir -p .cache/pip .cache/huggingface tmp
+export PIP_CACHE_DIR="$PWD/.cache/pip" HF_HOME="$PWD/.cache/huggingface"
+export XDG_CACHE_HOME="$PWD/.cache" TMPDIR="$PWD/tmp" PIP_CONFIG_FILE=/dev/null
+export TRITON_CACHE_DIR="$PWD/.cache/triton" CUDA_CACHE_PATH="$PWD/.cache/cuda"
+export TORCH_EXTENSIONS_DIR="$PWD/.cache/torch-extensions" FLASHINFER_WORKSPACE_DIR="$PWD/.cache/flashinfer"
+PY="$PWD/.venv/bin/python"
+test -x "$PY" || { echo 'Run scripts/setup_env.sh first' >&2; exit 1; }
+test -f data/development_questions.jsonl || { echo 'Run scripts/prepare_data.py first' >&2; exit 1; }
+OUT="results/foundation-${SLURM_JOB_ID}"; mkdir -p "$OUT"
+PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+URL="http://127.0.0.1:$PORT"
+nvidia-smi | tee "$OUT/nvidia-smi.txt"
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
+if ! "$PY" -c 'import csv,sys; rows=list(csv.reader(open(sys.argv[1]))); assert len(rows)==1 and "A100" in rows[0][0] and int(rows[0][1].split()[0])>=39000, rows' "$OUT/gpu.csv"; then
+  echo 'Expected one full A100 of at least 40 GB, not a MIG device' >&2; exit 1
+fi
+scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
+"$PY" -m pip freeze > "$OUT/installed-requirements.txt"
+cp configs/foundation.json "$OUT/config.json"
+"$PY" -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct \
+  --revision a09a35458c702b33eeacc393d103063234e8bc28 --dtype bfloat16 \
+  --host 127.0.0.1 --port "$PORT" --max-running-requests 1 > "$OUT/server.log" 2>&1 &
+SERVER_PID=$!
+trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+ready=0
+for ((i=0; i<180; i++)); do
+  if curl -fsS "$URL/health" >/dev/null 2>&1; then ready=1; break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo 'Server exited; inspect server.log' >&2; exit 1; fi
+  sleep 10
+done
+if [[ "$ready" != 1 ]]; then echo 'Server did not become healthy' >&2; exit 1; fi
+"$PY" scripts/check_cache.py --url "$URL" --out "$OUT/cache-proof.json"
+"$PY" scripts/run_questions.py --url "$URL" --mode direct --out "$OUT/direct" --labels data/development_labels.jsonl
+"$PY" scripts/run_questions.py --url "$URL" --mode cot --out "$OUT/cot" --labels data/development_labels.jsonl
+"$PY" - "$OUT" <<'PY'
+import json, pathlib, sys
+out = pathlib.Path(sys.argv[1])
+for mode in ('direct', 'cot'):
+    records = [json.loads(line) for line in (out / mode / 'questions.jsonl').read_text().splitlines()]
+    if len(records) != 10 or not any(r['status'] == 'completed' for r in records):
+        raise SystemExit('%s: expected 10 records and at least one parsed completion' % mode)
+    print('%s: %d/10 parsed completions' % (mode, sum(r['status'] == 'completed' for r in records)))
+PY
