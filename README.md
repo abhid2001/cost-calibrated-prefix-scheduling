@@ -117,6 +117,8 @@ python scripts/summarize.py --input results/tot-load/questions.jsonl \
 
 The runner supports all four modes and concurrent question arrivals. Calls within each question are currently sequential. Request and question logs include outputs, failures, dependencies, and client-side timing.
 
+Runners stream responses from SGLang's native `/generate` endpoint and record `first_token_at` when the first generated token arrives, which gives time to first token (TTFT) measured from `ready_at`. All of these timestamps are recorded by the client and include HTTP overhead. They are suitable for queue-wait and TTFT metrics but are not GPU prefill measurements.
+
 ### 7. Run the Pilot
 
 After the foundation job succeeds, submit the pilot:

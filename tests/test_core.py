@@ -1,6 +1,6 @@
-import pathlib, sys, unittest
+import collections, http.server, json, pathlib, sys, threading, unittest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
-from prefix_scheduler.core import Request, normalize_number, parse_answer, prompt_for
+from prefix_scheduler.core import Request, chat_token_ids, generate, normalize_number, parse_answer, prompt_for
 
 class CoreTests(unittest.TestCase):
     def test_state_machine(self):
@@ -21,4 +21,75 @@ class CoreTests(unittest.TestCase):
     def test_prompt_modes(self):
         self.assertNotEqual(prompt_for('q','direct')[0],prompt_for('q','cot')[0])
         with self.assertRaises(ValueError): prompt_for('q','other')
+
+class FakeTokenizer:
+    """Mimics transformers 5: dict-like BatchEncoding unless return_dict=False."""
+    def __init__(self, ids): self.ids, self.kwargs = ids, None
+    def apply_chat_template(self, messages, tokenize, add_generation_prompt, return_dict=True):
+        self.kwargs = dict(tokenize=tokenize, add_generation_prompt=add_generation_prompt, return_dict=return_dict)
+        return collections.UserDict(input_ids=self.ids) if return_dict else self.ids
+
+class ChatTokenIdTests(unittest.TestCase):
+    def test_requests_flat_list(self):
+        tok = FakeTokenizer([1, 2, 3])
+        self.assertEqual(chat_token_ids(tok, []), [1, 2, 3])
+        self.assertEqual(tok.kwargs, dict(tokenize=True, add_generation_prompt=True, return_dict=False))
+    def test_rejects_non_list(self):
+        tok = FakeTokenizer([1, 2, 3]); tok.apply_chat_template = lambda *a, **k: collections.UserDict(input_ids=[1])
+        with self.assertRaises(TypeError): chat_token_ids(tok, [])
+        tok.apply_chat_template = lambda *a, **k: [[1, 2]]
+        with self.assertRaises(TypeError): chat_token_ids(tok, [])
+
+class StreamHandler(http.server.BaseHTTPRequestHandler):
+    """Replies with whatever event lines the test put in `lines`."""
+    lines = []
+    def log_message(self, *args): pass
+    def do_POST(self):
+        StreamHandler.body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
+        for line in StreamHandler.lines: self.wfile.write(line.encode() + b'\n\n')
+
+def event(chunk): return 'data: ' + json.dumps(chunk)
+
+class GenerateStreamTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = http.server.HTTPServer(('127.0.0.1', 0), StreamHandler)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.url = 'http://127.0.0.1:%d/generate' % cls.server.server_port
+    @classmethod
+    def tearDownClass(cls): cls.server.shutdown(); cls.server.server_close()
+    def run_stream(self, lines, record=None):
+        StreamHandler.lines = lines
+        return generate(self.url, [1, 2], {'max_new_tokens': 4}, 5, record)
+
+    def test_final_chunk_and_first_token(self):
+        r = Request('q', 'r', 'cot', 'a', 'b'); r.transition('ready'); r.transition('running')
+        text, meta = self.run_stream([event({'text': 'Fin', 'meta_info': {'completion_tokens': 1}}),
+                                      event({'text': 'Final answer: 42', 'meta_info': {'completion_tokens': 2, 'cached_tokens': 7}}),
+                                      'data: [DONE]'], r)
+        r.transition('completed')
+        self.assertEqual((text, meta['cached_tokens']), ('Final answer: 42', 7))
+        self.assertTrue(StreamHandler.body['stream'])
+        self.assertEqual(StreamHandler.body['input_ids'], [1, 2])
+        self.assertTrue(r.admitted_at <= r.first_token_at <= r.finished_at)
+    def test_first_token_not_overwritten(self):
+        r = Request('q', 'r', 'cot', 'a', 'b'); r.first_token_at = 'set-earlier'
+        self.run_stream([event({'text': 'x', 'meta_info': {'completion_tokens': 1}}), 'data: [DONE]'], r)
+        self.assertEqual(r.first_token_at, 'set-earlier')
+    def test_token_count_beats_empty_text(self):
+        r = Request('q', 'r', 'cot', 'a', 'b')
+        self.run_stream([event({'text': '', 'meta_info': {'completion_tokens': 1}}), 'data: [DONE]'], r)
+        self.assertIsNotNone(r.first_token_at)
+        r = Request('q', 'r', 'cot', 'a', 'b')
+        self.run_stream([event({'text': '', 'meta_info': {'completion_tokens': 0}}), 'data: [DONE]'], r)
+        self.assertIsNone(r.first_token_at)
+    def test_text_fallback_without_token_count(self):
+        r = Request('q', 'r', 'cot', 'a', 'b')
+        self.run_stream([event({'text': '', 'meta_info': {}}), event({'text': 'hi'}), 'data: [DONE]'], r)
+        self.assertIsNotNone(r.first_token_at)
+    def test_empty_stream_and_engine_error(self):
+        with self.assertRaises(RuntimeError): self.run_stream(['data: [DONE]'])
+        with self.assertRaises(RuntimeError): self.run_stream([event({'error': {'message': 'boom'}})])
+
 if __name__ == '__main__': unittest.main()

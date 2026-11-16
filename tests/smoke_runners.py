@@ -6,18 +6,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_POST(self):
         data=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        if not data.get('input_ids'): raise AssertionError('missing input IDs')
+        if not isinstance(data.get('input_ids'), list) or not data['input_ids']: raise AssertionError('missing input IDs')
+        if data.get('stream') is not True: raise AssertionError('runners must stream to record first_token_at')
         self.__class__.calls += 1
         call=self.__class__.calls
         answer='Selected: 1' if MODE == 'tot' and call in (3,6) else 'Final answer: 42'
-        payload=json.dumps({'text':answer,'meta_info':{'cached_tokens':0}}).encode()
-        self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(payload)
+        # SGLang-style stream: cumulative text per chunk, then [DONE].
+        chunks=[{'text':answer[:3],'meta_info':{'completion_tokens':1,'cached_tokens':0}},
+                {'text':answer,'meta_info':{'completion_tokens':2,'cached_tokens':0}}]
+        self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
+        for chunk in chunks: self.wfile.write(b'data: '+json.dumps(chunk).encode()+b'\n\n')
+        self.wfile.write(b'data: [DONE]\n\n')
+def check_timing(records):
+    for r in records:
+        assert r['first_token_at'] is not None, r['request_id']
+        assert r['admitted_at'] <= r['first_token_at'] <= r['finished_at'], r
 server=http.server.HTTPServer(('127.0.0.1',0),Handler)
 threading.Thread(target=server.serve_forever,daemon=True).start()
 env=os.environ.copy(); env.update(HF_HOME=str(ROOT/'.cache/huggingface'), XDG_CACHE_HOME=str(ROOT/'.cache'), TMPDIR=str(ROOT/'tmp'), HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
 with tempfile.TemporaryDirectory(dir=ROOT/'tmp') as directory:
     fake=pathlib.Path(directory)/'transformers'; fake.mkdir()
-    (fake/'__init__.py').write_text("class Tokenizer:\n def apply_chat_template(self,messages,tokenize,add_generation_prompt): return [1,2,3] if tokenize else 'mock prompt'\nclass AutoTokenizer:\n @classmethod\n def from_pretrained(cls,*args,**kwargs): return Tokenizer()\n")
+    # Mimic transformers 5: tokenize=True returns a dict-like BatchEncoding unless return_dict=False.
+    (fake/'__init__.py').write_text("import collections\nclass Tokenizer:\n def apply_chat_template(self,messages,tokenize,add_generation_prompt,return_dict=True):\n  if not tokenize: return 'mock prompt'\n  return collections.UserDict(input_ids=[1,2,3],attention_mask=[1,1,1]) if return_dict else [1,2,3]\nclass AutoTokenizer:\n @classmethod\n def from_pretrained(cls,*args,**kwargs): return Tokenizer()\n")
     env['PYTHONPATH']=directory
     q=pathlib.Path(directory)/'questions.jsonl'; q.write_text(json.dumps({'question_id':'q1','question':'What is 40 plus 2?'})+'\n')
     for MODE in ('direct','cot','self_consistency','tot'):
@@ -30,6 +40,7 @@ with tempfile.TemporaryDirectory(dir=ROOT/'tmp') as directory:
         assert len(records)==count and Handler.calls==count and results[0]['status']=='completed' and results[0]['answer']=='42', (MODE,results)
         if MODE=='tot':
             assert len(records[2]['parent_ids'])==2 and len(records[3]['parent_ids'])==2 and len(records[5]['parent_ids'])==2 and len(records[6]['parent_ids'])==2
+        check_timing(records)
         print(MODE, 'ok:', count, 'calls')
     for MODE in ('self_consistency','tot'):
         Handler.calls=0
@@ -41,5 +52,6 @@ with tempfile.TemporaryDirectory(dir=ROOT/'tmp') as directory:
         records=[json.loads(x) for x in (out/'requests.jsonl').read_text().splitlines()]
         assert result['status']=='completed' and len(records)==(3 if MODE=='self_consistency' else 7)
         if MODE=='tot': assert len(records[2]['parent_ids'])==2 and len(records[5]['parent_ids'])==2
+        check_timing(records)
         print('load trace', MODE, 'ok:', len(records), 'calls')
 server.shutdown()
