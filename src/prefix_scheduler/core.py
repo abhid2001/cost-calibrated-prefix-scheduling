@@ -77,7 +77,47 @@ def prompt_for(question, mode):
     return [{'role': 'system', 'content': instruction + ' End with exactly Final answer: <number>.'},
             {'role': 'user', 'content': question}]
 
+def chat_token_ids(tokenizer, messages):
+    """Chat-template token IDs as a flat list of ints.
+
+    transformers 5 returns a BatchEncoding (input_ids and attention_mask) by default, which is
+    not JSON-serializable and has len() == 2. Fail loudly if the type ever changes again.
+    """
+    ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
+    if not isinstance(ids, list) or not all(isinstance(t, int) for t in ids):
+        raise TypeError('expected a flat list of token IDs, got %s' % type(ids).__name__)
+    return ids
+
 def post_json(url, data, timeout=300):
     request = urllib.request.Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+def generate(url, input_ids, sampling_params, timeout=300, record=None):
+    """Stream SGLang's native /generate endpoint and return (text, meta_info).
+
+    The server sends `data: {json}` lines and ends with `data: [DONE]`. In the default mode each
+    chunk carries the cumulative text, so the final text and meta_info come from the last chunk.
+    If a record is given, record.first_token_at is set when the first chunk reporting a generated
+    token arrives. That timestamp is a client-side observation (it includes HTTP overhead): valid
+    for TTFT, never a GPU prefill measurement.
+    """
+    body = json.dumps({'input_ids': input_ids, 'sampling_params': sampling_params, 'stream': True}).encode()
+    request = urllib.request.Request(url, body, {'Content-Type': 'application/json'})
+    last = None
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        for raw in response:
+            line = raw.decode('utf-8').strip()
+            if not line.startswith('data:'): continue
+            data = line[len('data:'):].strip()
+            if data == '[DONE]': break
+            chunk = json.loads(data)
+            if 'error' in chunk: raise RuntimeError('engine error: %s' % (chunk['error'],))
+            meta = chunk.get('meta_info') or {}
+            # Prefer the engine's token count: the first token can decode to empty text.
+            generated = meta['completion_tokens'] >= 1 if 'completion_tokens' in meta else bool(chunk.get('text'))
+            if record is not None and record.first_token_at is None and generated:
+                record.first_token_at = now()
+            last = chunk
+    if last is None: raise RuntimeError('stream ended without any output chunk')
+    return last.get('text', ''), last.get('meta_info') or {}
