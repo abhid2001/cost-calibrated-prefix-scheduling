@@ -44,6 +44,13 @@ Model weights, caches, the virtual environment, generated datasets, and results 
 
 Run from the repository root on Linux with Python 3.11. The installation requires network access and significant storage for GPU dependencies.
 
+On CURC, `/home` has a 2 GB quota, which is too small for the environment (about 15 GB) and the model weights (about 15 GB). If the repository is under `/home`, first link the large directories to your `/projects` space:
+
+```bash
+L=/projects/$USER/ccps-local; mkdir -p $L/venv $L/cache $L/tmp $L/results
+ln -s $L/venv .venv; ln -s $L/cache .cache; ln -s $L/tmp tmp; ln -s $L/results results
+```
+
 ```bash
 PYTHON=python3.11 scripts/setup_env.sh
 source .venv/bin/activate
