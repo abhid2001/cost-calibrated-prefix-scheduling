@@ -1,4 +1,5 @@
 import collections, http.server, json, pathlib, sys, threading, unittest
+from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
 from prefix_scheduler.core import Request, chat_token_ids, generate, normalize_number, parse_answer, prompt_for
 
@@ -88,8 +89,21 @@ class GenerateStreamTests(unittest.TestCase):
         r = Request('q', 'r', 'cot', 'a', 'b')
         self.run_stream([event({'text': '', 'meta_info': {}}), event({'text': 'hi'}), 'data: [DONE]'], r)
         self.assertIsNotNone(r.first_token_at)
+    def test_metadata_from_earlier_stream_chunks_is_preserved(self):
+        text, meta = self.run_stream([event({'text': 'x', 'meta_info': {'prefill_gpu_ms': 2.5, 'cached_tokens': 3}}),
+                                      event({'text': 'xy', 'meta_info': {'completion_tokens': 2}}), 'data: [DONE]'])
+        self.assertEqual((text, meta['prefill_gpu_ms'], meta['cached_tokens'], meta['completion_tokens']), ('xy', 2.5, 3, 2))
     def test_empty_stream_and_engine_error(self):
         with self.assertRaises(RuntimeError): self.run_stream(['data: [DONE]'])
         with self.assertRaises(RuntimeError): self.run_stream([event({'error': {'message': 'boom'}})])
+    def test_malformed_stream_is_a_clear_error(self):
+        with self.assertRaisesRegex(RuntimeError, 'malformed streaming event'):
+            self.run_stream(['data: not-json'])
+        with self.assertRaisesRegex(RuntimeError, 'expected JSON object'):
+            self.run_stream(['data: []'])
+    def test_transport_timeout_propagates(self):
+        with mock.patch('prefix_scheduler.core.urllib.request.urlopen', side_effect=TimeoutError('timeout')):
+            with self.assertRaisesRegex(TimeoutError, 'timeout'):
+                generate(self.url, [1], {'max_new_tokens': 1}, 0.01)
 
 if __name__ == '__main__': unittest.main()

@@ -10,6 +10,7 @@ import concurrent.futures
 import dataclasses
 import datetime
 import json
+import math
 import os
 import pathlib
 import sys
@@ -36,6 +37,8 @@ p.add_argument('--admission-log', help='JSONL written by PREFIX_ADMISSION_LOG')
 p.add_argument('--dependency-graph', help='atomically updated graph snapshot for dependency-aware engine admission')
 p.add_argument('--require-live-admissions', action='store_true',
                help='fail unless every dispatched request has one engine admission record')
+p.add_argument('--require-stream-telemetry', action='store_true',
+               help='fail unless completed requests have GPU prefill, cache and first-token telemetry')
 a = p.parse_args()
 if a.require_live_admissions and not a.admission_log:
     p.error('--require-live-admissions requires --admission-log')
@@ -121,6 +124,8 @@ def dispatch(graph, request):
         prepare(request, messages)
         with lock:
             request.transition('running')
+            # Only the engine admission log can establish this timestamp.
+            request.admitted_at = None
             write_dependency_graph()
             event('dispatched', request, input_tokens=len(request.input_token_ids))
         start = time.monotonic()
@@ -197,6 +202,7 @@ records = [request for graph in graphs for request in graph.records]
 by_id = {request.request_id: request for request in records}
 live_events = []
 missing = []
+cache_mismatches = []
 if a.admission_log:
     log_path = pathlib.Path(a.admission_log)
     if not log_path.exists():
@@ -218,6 +224,10 @@ if a.admission_log:
                 missing.append(request_id)
                 continue
             item = items[0]
+            candidates = [candidate for candidate in item.get('candidates', []) if candidate.get('id') == request_id]
+            if request.status == 'completed' and (len(candidates) != 1 or
+                    candidates[0].get('cached_tokens') != request.matched_prefix_tokens):
+                cache_mismatches.append(request_id)
             request.admitted_at = datetime.datetime.fromtimestamp(item['ts_ns'] / 1_000_000_000,
                                                                    tz=datetime.timezone.utc).isoformat()
             request.engine_metadata = dict(request.engine_metadata or {})
@@ -243,4 +253,22 @@ for graph, row in zip(graphs, trace):
 (out / 'questions.jsonl').write_text(''.join(json.dumps(result) + '\n' for result in results))
 if a.require_live_admissions and missing:
     raise SystemExit('Missing or non-unique engine admissions for: ' + ', '.join(sorted(missing)))
+if a.require_live_admissions and cache_mismatches:
+    raise SystemExit('Engine admission and response cache telemetry disagree for: ' + ', '.join(sorted(cache_mismatches)))
+if a.require_stream_telemetry:
+    errors = []
+    for request in records:
+        if request.status != 'completed':
+            continue
+        meta = request.engine_metadata or {}
+        ms = meta.get('prefill_gpu_ms')
+        cached = meta.get('cached_tokens')
+        if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not math.isfinite(ms) or ms < 0:
+            errors.append(request.request_id + ': missing or invalid prefill_gpu_ms')
+        if isinstance(cached, bool) or not isinstance(cached, int) or cached < 0:
+            errors.append(request.request_id + ': missing or invalid cached_tokens')
+        if request.first_token_at is None:
+            errors.append(request.request_id + ': missing first_token_at')
+    if errors:
+        raise SystemExit('Streaming telemetry validation failed: ' + '; '.join(errors))
 print('Saved', len(results), 'materialized question graphs and', len(records), 'request records to', out)

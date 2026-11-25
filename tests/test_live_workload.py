@@ -58,3 +58,13 @@ class LiveWorkloadTests(unittest.TestCase):
         self.assertEqual({request.request_id for request in failed},
                          {'q:r1eval', 'q:r2c1', 'q:r2c2', 'q:r2eval', 'q:final'})
         self.assertTrue(all(request.status == 'failed' for request in failed))
+
+    def test_partial_tot_waits_for_both_candidates(self):
+        graph = materialize('q', 'question', 'tot', 'arrival', 32)
+        roots, _ = release(graph)
+        self.assertEqual(len(roots), 2)
+        complete(graph.node('r1c1'), 'first partial')
+        ready, failed = release(graph)
+        self.assertFalse(ready)
+        self.assertFalse(failed)
+        self.assertEqual(graph.node('r1eval').status, 'blocked')

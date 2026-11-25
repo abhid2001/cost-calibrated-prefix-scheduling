@@ -26,6 +26,7 @@ scheduler/
 │   ├── load_reasoning_trace.py      # Concurrent materialized-DAG live workload driver
 │   ├── collect_calibration.py       # Collect instrumented prefill timings
 │   ├── fit_calibration.py           # Fit and validate the predictor
+│   ├── calibration.slurm             # Full-A100 development-only calibration
 │   ├── pilot.slurm                  # Pilot workload on an A100
 │   ├── reasoning_comparison.slurm   # Four-mode comparison
 │   └── scheduler_matrix.slurm       # Reserved scheduler-matrix entrypoint
@@ -133,7 +134,15 @@ sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
 
 ### 8. Run the Pilot
 
-After the foundation job succeeds, submit the pilot:
+After the foundation job succeeds, collect an accepted full-A100 development predictor:
+
+```bash
+sbatch --account=YOUR_ACCOUNT scripts/calibration.slurm
+```
+
+The calibration job measures repeated cold/warm pairs using disjoint development and held-out GSM8K prompt IDs, including zero-, two-, and four-demonstration chat contexts. It writes `model/predictor.json` only with a sibling held-out validation report; the matrix refuses a predictor that the report does not accept.
+
+Then submit the pilot:
 
 ```bash
 sbatch --account=YOUR_ACCOUNT scripts/pilot.slurm
@@ -147,11 +156,11 @@ Keep calibration development-only. The matrix accepts only a predictor whose sib
 
 ```bash
 PILOT_SELECTION="$PWD/results/pilot-<job-id>/pilot-selection.json" \
-DEVELOPMENT_PREDICTOR="$PWD/results/interactive-calibration-<job-id>-<time>/model/predictor.json" \
+DEVELOPMENT_PREDICTOR="$PWD/results/calibration-<job-id>/model/predictor.json" \
 sbatch --account=YOUR_ACCOUNT scripts/scheduler_matrix.slurm
 ```
 
-Each policy receives the same trace hash, seed, token budget, server constraints, cache reset, and accepted predictor. `matrix-summary.json` reports question latency, engine admission wait, throughput, failures, cache telemetry, GPU prefill timing, calibration fallback/coverage, accuracy, dependency decisions, unlock counts, and fairness-cycle errors. The matrix is an experiment, not a claim that dependency-aware scheduling improves performance.
+Each policy receives the same trace hash, seed, token budget, server constraints, cache reset, and accepted predictor. `matrix-summary.json` reports question latency, engine admission wait, throughput, failures, cache telemetry, GPU prefill timing, calibration fallback/coverage, accuracy, dependency decisions, unlock counts, and fairness-cycle errors. The matrix is an experiment, not a claim that dependency-aware scheduling improves performance. The full, resume-safe procedure and final reporting template are in [`docs/EXPERIMENT_PROTOCOL.md`](docs/EXPERIMENT_PROTOCOL.md) and [`docs/REPORT_TEMPLATE.md`](docs/REPORT_TEMPLATE.md).
 
 ---
 
@@ -164,7 +173,7 @@ The calibrated policy uses a lookup predictor fitted from paired cold and warm p
 An optional `dependency-aware` policy adds a configurable per-unlocked-child bonus (in milliseconds) to the predicted saving on cache-ranked admissions. It keeps the same oldest-first cycle and falls back to the baseline for the whole choice when prediction or dependency information is unavailable. The workload driver atomically publishes its complete materialized graph (IDs, parent IDs, and states) to the engine hook. The hook counts a blocked child only if every other parent completed, logs the count and dependency score, and falls back uniformly if its predictor or graph snapshot is unavailable. It is an optional fourth policy, not a replacement for the three required policies.
 
 
-`scripts/install_prefill_instrumentation.py` applies an opt-in patch to the pinned SGLang 0.5.10.post1 environment and saves the original engine files in the ignored `patches/sglang-original/` directory. Enable it with `PREFIX_GPU_PREFILL_TIMING=1` and run with one GPU, `--max-running-requests 1`, `--chunked-prefill-size -1`, and `--disable-overlap-schedule`; incompatible settings fail. The patch records synchronized CUDA events around the model forward on its current stream, before token sampling, and exposes `meta_info.prefill_gpu_ms` on non-streaming responses. Event timing includes GPU work and stream idle gaps within that forward interval; it is not client TTFT. CUDA graph and piecewise graph settings must remain fixed for paired measurements.
+`scripts/install_prefill_instrumentation.py` applies an opt-in patch to the pinned SGLang 0.5.10.post1 environment and saves the original engine files in the ignored `patches/sglang-original/` directory. Enable it with `PREFIX_GPU_PREFILL_TIMING=1` and run with one GPU, `--max-running-requests 1`, `--chunked-prefill-size -1`, and `--disable-overlap-schedule`; incompatible settings fail. The patch records synchronized CUDA events around the model forward on its current stream, before token sampling, and exposes `meta_info.prefill_gpu_ms` in responses. Streaming telemetry has been verified on the 20 GB MIG configuration. Event timing includes GPU work and stream idle gaps within that forward interval; it is not client TTFT. CUDA graph and piecewise graph settings must remain fixed for paired measurements.
 
 `scripts/interactive_prefill.sh` launches a dedicated 20 GB MIG server with those constraints and validates cold and warm telemetry. One interactive smoke test passed with 700 cached tokens; these individual timings are not a performance comparison. `collect_calibration.py` flushes the server cache between paired measurements, so use only a dedicated server. A preliminary 20 GB MIG calibration and held-out validation have been run; more varied prompts and repeated measurements are needed before relying on the predictor.
 
@@ -190,11 +199,11 @@ To run a materialized four-mode workload through that same patched server, creat
   --limit 4 --rate 1000 --modes direct,cot,self_consistency,tot \
   --output results/live-smoke-trace.jsonl
 WORKLOAD_TRACE="$PWD/results/live-smoke-trace.jsonl" WORKLOAD_WORKERS=7 \
-  WORKLOAD_MAX_NEW_TOKENS=64 PREFIX_ADMISSION_POLICY=k-lpm \
+WORKLOAD_MAX_NEW_TOKENS=256 WORKLOAD_REQUIRE_FOUR_MODES=1 PREFIX_ADMISSION_POLICY=k-lpm \
   bash scripts/interactive_admission.sh
 ```
 
-This mode requires one live admission entry for every dispatched request. It writes `workload/requests.jsonl`, `questions.jsonl`, `events.jsonl`, and the filtered `admissions.jsonl`; `admitted_at` is populated only from engine telemetry, while `dispatched_at` remains the client timestamp. The 64-token value is a constrained 20 GB MIG smoke-test budget, not the evaluation budget.
+This mode requires one live admission entry for every dispatched request, streaming prefill/cache/first-token telemetry for every completed request, and agreement between the response and live-cache match. `workload/validation.json` independently checks rankings, the fairness cycle, dependency release order, competition, cache reuse, calibration fallback, and dependency-score behavior where applicable. It also writes `requests.jsonl`, `questions.jsonl`, `events.jsonl`, and filtered `admissions.jsonl`; `admitted_at` is populated only from engine telemetry, while `dispatched_at` remains the client timestamp. The 256-token value is a constrained 20 GB MIG smoke-test budget, not the evaluation budget.
 
 To enable the optional fourth policy, use an accepted predictor and a nonnegative unlock bonus. The script publishes the graph sidecar before dispatch and requires every request to have a live admission record:
 

@@ -12,22 +12,38 @@
 set -euo pipefail
 
 source "${SLURM_SUBMIT_DIR:?}/scripts/live_experiment_common.sh"
-OUT="$PWD/results/pilot-${SLURM_JOB_ID}"
+OUT="${PILOT_OUT:-$PWD/results/pilot-${SLURM_JOB_ID}}"
 mkdir -p "$OUT"
 trap stop_live_server EXIT
+"$PY" scripts/preflight_experiment.py --mode pilot --require-full-a100 > "$OUT/preflight.json"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
+scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
+"$PY" -m pip freeze > "$OUT/installed-requirements.txt"
+cp configs/foundation.json data/manifest.json "$OUT/"
 "$PY" -c 'import csv,sys; rows=list(csv.reader(open(sys.argv[1]))); assert len(rows)==1 and "A100" in rows[0][0] and int(rows[0][1].split()[0])>=39000, rows' "$OUT/gpu.csv"
 MAX_NEW=$("$PY" -c 'import json; print(json.load(open("configs/foundation.json"))["max_new_tokens"])')
 for RATE in 0.20 0.50 1.00; do
   RUN="$OUT/rate-$RATE"
   TRACE="$RUN/trace.jsonl"
   mkdir -p "$RUN"
+  if [[ -f "$RUN/completed-run.json" ]] && "$PY" scripts/verify_policy_run.py --run "$RUN" --policy fcfs --trace "$TRACE" --max-new-tokens "$MAX_NEW" >/dev/null 2>&1; then
+    printf 'Reusing completed pilot rate %s\n' "$RATE"
+    continue
+  fi
   "$PY" scripts/prepare_trace.py --questions data/development_questions.jsonl --limit 20 --rate "$RATE" --seed 20261114 --modes direct,cot,self_consistency,tot --output "$TRACE"
-  start_live_server fcfs "$RUN"
-  curl -fsS -X POST "$URL/flush_cache" > "$RUN/cache-reset.json"
-  "$PY" scripts/load_reasoning_trace.py --trace "$TRACE" --labels data/development_labels.jsonl --url "$URL" --out "$RUN/workload" --workers "${PILOT_WORKERS:-32}" --max-new-tokens "$MAX_NEW" --admission-log "$PREFIX_ADMISSION_LOG" --require-live-admissions
-  "$PY" scripts/analyze_run.py --run "$RUN/workload" --out "$RUN/analysis.json"
-  stop_live_server
+  if start_live_server fcfs "$RUN" && curl -fsS -X POST "$URL/flush_cache" > "$RUN/cache-reset.json" && \
+      "$PY" scripts/load_reasoning_trace.py --trace "$TRACE" --labels data/development_labels.jsonl --url "$URL" --out "$RUN/workload" --workers "${PILOT_WORKERS:-32}" --max-new-tokens "$MAX_NEW" --admission-log "$PREFIX_ADMISSION_LOG" --require-live-admissions --require-stream-telemetry && \
+      "$PY" scripts/validate_workload.py --run "$RUN/workload" --policy fcfs --require-four-modes && \
+      "$PY" scripts/analyze_run.py --run "$RUN/workload" --out "$RUN/analysis.json"; then
+    "$PY" scripts/record_run.py --out "$RUN/completed-run.json" --kind pilot-rate --status completed --config configs/foundation.json --trace "$TRACE" --hardware "$OUT/gpu.csv" --policy fcfs --max-new-tokens "$MAX_NEW"
+    stop_live_server
+  else
+    status=$?
+    stop_live_server
+    "$PY" scripts/record_run.py --out "$RUN/failed-run.json" --kind pilot-rate --status failed --config configs/foundation.json --trace "$TRACE" --hardware "$OUT/gpu.csv" --policy fcfs --max-new-tokens "$MAX_NEW" --note 'See preserved workload, admission, and server artifacts in this rate directory.'
+    exit "$status"
+  fi
 done
 "$PY" scripts/select_pilot_rate.py --analyses "$OUT/rate-*/analysis.json" --out "$OUT/pilot-selection.json"
+"$PY" scripts/record_run.py --out "$OUT/completed-run.json" --kind pilot --status completed --config configs/foundation.json --hardware "$OUT/gpu.csv" --note 'Each rate has an independently reusable completion record.'
 printf 'Pilot completed: %s\n' "$OUT"

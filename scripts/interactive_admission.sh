@@ -21,6 +21,11 @@ if [[ "$PREFIX_ADMISSION_POLICY" == "dependency-aware" ]]; then
   : "${PREFIX_PREDICTOR_PATH:?dependency-aware policy requires PREFIX_PREDICTOR_PATH}"
   export PREFIX_DEPENDENCY_GRAPH_PATH="$OUT/workload/dependency_graph.json"
 fi
+if [[ "$PREFIX_ADMISSION_POLICY" == "calibrated" || "$PREFIX_ADMISSION_POLICY" == "dependency-aware" ]]; then
+  : "${PREFIX_PREDICTOR_PATH:?$PREFIX_ADMISSION_POLICY policy requires PREFIX_PREDICTOR_PATH}"
+  PREDICTOR_VALIDATION="$(dirname "$PREFIX_PREDICTOR_PATH")/validation.json"
+  "$PY" -c 'import json,sys; assert json.load(open(sys.argv[1])).get("acceptance",{}).get("accepted") is True' "$PREDICTOR_VALIDATION"
+fi
 nvidia-smi > "$OUT/nvidia-smi.txt"
 nvidia-smi -L > "$OUT/gpu-devices.txt"
 "$PY" -c 'import torch; assert torch.cuda.is_available(); n=torch.cuda.device_count(); p=torch.cuda.get_device_properties(0); print("name=%s memory_bytes=%d device_count=%d"%(p.name,p.total_memory,n)); assert n==1 and "A100" in p.name and 18*1024**3 <= p.total_memory < 23*1024**3' | tee "$OUT/cuda-device.txt"
@@ -46,7 +51,10 @@ if [[ -n "${WORKLOAD_TRACE:-}" ]]; then
   fi
   "$PY" scripts/load_reasoning_trace.py --trace "$WORKLOAD_TRACE" --url "$URL" --out "$OUT/workload" \
     --workers "${WORKLOAD_WORKERS:-32}" --max-new-tokens "${WORKLOAD_MAX_NEW_TOKENS:-256}" \
-    --admission-log "$PREFIX_ADMISSION_LOG" --require-live-admissions "${EXTRA_ARGS[@]}"
+    --admission-log "$PREFIX_ADMISSION_LOG" --require-live-admissions --require-stream-telemetry "${EXTRA_ARGS[@]}"
+  VALIDATION_ARGS=()
+  if [[ "${WORKLOAD_REQUIRE_FOUR_MODES:-0}" == 1 ]]; then VALIDATION_ARGS+=(--require-four-modes); fi
+  "$PY" scripts/validate_workload.py --run "$OUT/workload" --policy "$PREFIX_ADMISSION_POLICY" "${VALIDATION_ARGS[@]}"
   printf 'Live workload validation passed. Results: %s\n' "$OUT"
 else
   [[ "$PREFIX_ADMISSION_POLICY" != "dependency-aware" ]] || { echo 'dependency-aware validation requires WORKLOAD_TRACE' >&2; exit 2; }

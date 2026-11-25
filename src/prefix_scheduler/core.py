@@ -115,6 +115,7 @@ def generate(url, input_ids, sampling_params, timeout=300, record=None, rid=None
         body['rid'] = rid
     request = urllib.request.Request(url, json.dumps(body).encode(), {'Content-Type': 'application/json'})
     last = None
+    metadata = {}
     with urllib.request.urlopen(request, timeout=timeout) as response:
         for raw in response:
             line = raw.decode('utf-8').strip()
@@ -123,14 +124,20 @@ def generate(url, input_ids, sampling_params, timeout=300, record=None, rid=None
             data = line[len('data:'):].strip()
             if data == '[DONE]':
                 break
-            chunk = json.loads(data)
+            try:
+                chunk = json.loads(data)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError('malformed streaming event: %s' % exc) from exc
+            if not isinstance(chunk, dict):
+                raise RuntimeError('malformed streaming event: expected JSON object')
             if 'error' in chunk:
                 raise RuntimeError('engine error: %s' % (chunk['error'],))
             meta = chunk.get('meta_info') or {}
+            metadata.update(meta)
             generated = meta.get('completion_tokens', 0) >= 1 or bool(chunk.get('text'))
             if record is not None and record.first_token_at is None and generated:
                 record.first_token_at = now()
             last = chunk
     if last is None:
         raise RuntimeError('stream ended without any output chunk')
-    return last.get('text', ''), last.get('meta_info') or {}
+    return last.get('text', ''), metadata
