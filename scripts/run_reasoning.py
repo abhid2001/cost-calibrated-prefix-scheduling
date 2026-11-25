@@ -2,7 +2,7 @@
 """Run self consistency or bounded ToT against the native SGLang API serially."""
 import argparse, dataclasses, json, pathlib, sys, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
-from prefix_scheduler.core import chat_token_ids, post_json, normalize_number, now
+from prefix_scheduler.core import chat_token_ids, generate, normalize_number, now
 from prefix_scheduler.reasoning import Controller
 from transformers import AutoTokenizer
 
@@ -27,11 +27,10 @@ def prepare(r, messages):
 def execute(r, messages, temperature):
     start=time.monotonic()
     try:
-        result=post_json(a.url+'/generate', {'input_ids':r.input_token_ids, 'sampling_params':{
-            'temperature':temperature, 'max_new_tokens':r.max_new_tokens, 'sampling_seed':r.sampling_seed}}, config['request_timeout_seconds'])
-        r.engine_metadata=result.get('meta_info',{})
+        text, r.engine_metadata=generate(a.url+'/generate', r.input_token_ids, {
+            'temperature':temperature, 'max_new_tokens':r.max_new_tokens, 'sampling_seed':r.sampling_seed}, config['request_timeout_seconds'], r)
         r.matched_prefix_tokens=r.engine_metadata.get('cached_tokens')
-        return result['text']
+        return text
     finally:
         r.client_duration_ms=(time.monotonic()-start)*1000
 

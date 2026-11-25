@@ -107,6 +107,8 @@ python scripts/run_reasoning.py --mode tot --labels data/development_labels.json
 
 Self-consistency votes over three complete solutions. The ToT controller generates and evaluates two candidates in each of two rounds, then synthesizes an answer: seven model calls when all stages succeed. Labels are used for scoring after generation and are not included in prompts.
 
+The runners stream responses from SGLang's native `/generate` endpoint and record `first_token_at` when the first generated token arrives, giving client-observed time-to-first-token (TTFT) from `ready_at`. These client timestamps include HTTP overhead: they support queue-wait and TTFT metrics, but are not GPU prefill measurements.
+
 ### 6. Generate and Run an Arrival Trace
 
 ```bash

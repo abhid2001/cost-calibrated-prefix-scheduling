@@ -2,7 +2,7 @@
 """Open-loop HTTP load generator for single-call modes. No scheduling claims."""
 import argparse,concurrent.futures,datetime,json,pathlib,sys,time
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'src'))
-from prefix_scheduler.core import chat_token_ids, now,parse_answer,post_json,prompt_for
+from prefix_scheduler.core import chat_token_ids,now,parse_answer,post_json,prompt_for
 from transformers import AutoTokenizer
 p=argparse.ArgumentParser();p.add_argument('--trace',required=True);p.add_argument('--out',required=True);p.add_argument('--url',default='http://127.0.0.1:30000');p.add_argument('--config',default='configs/foundation.json');p.add_argument('--workers',type=int,default=32);a=p.parse_args()
 c=json.loads(pathlib.Path(a.config).read_text()); trace=[json.loads(x) for x in pathlib.Path(a.trace).read_text().splitlines() if x.strip()]

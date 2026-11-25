@@ -48,7 +48,11 @@ class Request:
         stamp = timestamp or now()
         self.status = state
         if state == 'ready': self.ready_at = stamp
-        if state == 'running': self.dispatched_at = stamp
+        if state == 'running':
+            self.dispatched_at = stamp
+            # Compatibility for serial runners; the live workload replaces
+            # this with the engine-side admission timestamp after log join.
+            self.admitted_at = stamp
         if state in ('completed', 'failed'): self.finished_at = stamp
 
 
@@ -81,19 +85,52 @@ def prompt_for(question, mode):
     return [{'role': 'system', 'content': instruction + ' End with exactly Final answer: <number>.'},
             {'role': 'user', 'content': question}]
 
+def chat_token_ids(tokenizer, messages):
+    """Return a flat, JSON-serializable chat-token list across transformers versions."""
+    tokens = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
+    # `return_dict=False` handles current Transformers releases.  Normalize
+    # older/fake tokenizers too, rather than sending a BatchEncoding or batch
+    # dimension to SGLang's native input_ids API.
+    if isinstance(tokens, Mapping):
+        tokens = tokens.get('input_ids')
+    if hasattr(tokens, 'tolist'):
+        tokens = tokens.tolist()
+    if isinstance(tokens, (list, tuple)) and len(tokens) == 1 and isinstance(tokens[0], (list, tuple)):
+        tokens = tokens[0]
+    if not isinstance(tokens, (list, tuple)) or not all(isinstance(token, int) and not isinstance(token, bool) for token in tokens):
+        raise ValueError('chat template returned invalid token IDs')
+    return list(tokens)
+
+
 def post_json(url, data, timeout=300):
     request = urllib.request.Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
 
 
-def chat_token_ids(tokenizer, messages):
-    """Normalize chat-template outputs across Transformers versions."""
-    tokens = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
-    if isinstance(tokens, Mapping): tokens = tokens["input_ids"]
-    if hasattr(tokens, "tolist"): tokens = tokens.tolist()
-    if isinstance(tokens, (list, tuple)) and len(tokens) == 1 and isinstance(tokens[0], (list, tuple)):
-        tokens = tokens[0]
-    if not isinstance(tokens, (list, tuple)) or not all(isinstance(x, int) and not isinstance(x, bool) for x in tokens):
-        raise ValueError("chat template returned invalid token IDs")
-    return list(tokens)
+def generate(url, input_ids, sampling_params, timeout=300, record=None, rid=None):
+    """Stream native SGLang output and record client-observed TTFT when requested."""
+    body = {'input_ids': input_ids, 'sampling_params': sampling_params, 'stream': True}
+    if rid is not None:
+        body['rid'] = rid
+    request = urllib.request.Request(url, json.dumps(body).encode(), {'Content-Type': 'application/json'})
+    last = None
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        for raw in response:
+            line = raw.decode('utf-8').strip()
+            if not line.startswith('data:'):
+                continue
+            data = line[len('data:'):].strip()
+            if data == '[DONE]':
+                break
+            chunk = json.loads(data)
+            if 'error' in chunk:
+                raise RuntimeError('engine error: %s' % (chunk['error'],))
+            meta = chunk.get('meta_info') or {}
+            generated = meta.get('completion_tokens', 0) >= 1 or bool(chunk.get('text'))
+            if record is not None and record.first_token_at is None and generated:
+                record.first_token_at = now()
+            last = chunk
+    if last is None:
+        raise RuntimeError('stream ended without any output chunk')
+    return last.get('text', ''), last.get('meta_info') or {}

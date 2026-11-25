@@ -17,15 +17,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                           'reason':'oldest','ranked_ids':[data['rid']],'ts_ns':time.time_ns()})+'\n')
         time.sleep(.01)
         answer='Selected: 1' if MODE == 'tot' and call in (3,6) else 'Final answer: 42'
-        payload=json.dumps({'text':answer,'meta_info':{'cached_tokens':0}}).encode()
-        self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(payload)
+        payload=json.dumps({'text':answer,'meta_info':{'cached_tokens':0,'completion_tokens':1}}).encode()
+        self.send_response(200)
+        if data.get('stream'):
+            self.send_header('Content-Type','text/event-stream')
+            self.end_headers()
+            self.wfile.write(b'data: '+payload+b'\n\n')
+            self.wfile.write(b'data: [DONE]\n\n')
+        else:
+            self.send_header('Content-Type','application/json')
+            self.end_headers(); self.wfile.write(payload)
         with self.__class__.lock: self.__class__.in_flight -= 1
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
 threading.Thread(target=server.serve_forever,daemon=True).start()
 env=os.environ.copy(); env.update(HF_HOME=str(ROOT/'.cache/huggingface'), XDG_CACHE_HOME=str(ROOT/'.cache'), TMPDIR=str(ROOT/'tmp'), HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
 with tempfile.TemporaryDirectory(dir=ROOT/'tmp') as directory:
     fake=pathlib.Path(directory)/'transformers'; fake.mkdir()
-    (fake/'__init__.py').write_text("class Tokenizer:\n def apply_chat_template(self,messages,tokenize,add_generation_prompt): return [1,2,3] if tokenize else 'mock prompt'\nclass AutoTokenizer:\n @classmethod\n def from_pretrained(cls,*args,**kwargs): return Tokenizer()\n")
+    (fake/'__init__.py').write_text("class Tokenizer:\n def apply_chat_template(self,messages,tokenize,add_generation_prompt,return_dict=False): return [1,2,3] if tokenize else 'mock prompt'\nclass AutoTokenizer:\n @classmethod\n def from_pretrained(cls,*args,**kwargs): return Tokenizer()\n")
     env['PYTHONPATH']=directory
     q=pathlib.Path(directory)/'questions.jsonl'; q.write_text(json.dumps({'question_id':'q1','question':'What is 40 plus 2?'})+'\n')
     for MODE in ('direct','cot','self_consistency','tot'):

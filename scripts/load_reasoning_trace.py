@@ -18,7 +18,7 @@ import time
 import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
-from prefix_scheduler.core import chat_token_ids, normalize_number, now, post_json
+from prefix_scheduler.core import chat_token_ids, generate, normalize_number, now
 from prefix_scheduler.live_workload import materialize, question_result, release
 from transformers import AutoTokenizer
 
@@ -124,19 +124,17 @@ def dispatch(graph, request):
             write_dependency_graph()
             event('dispatched', request, input_tokens=len(request.input_token_ids))
         start = time.monotonic()
-        response = post_json(a.url + '/generate', {
-            'rid': request.request_id,
-            'input_ids': request.input_token_ids,
-            'sampling_params': {'temperature': temperature, 'max_new_tokens': request.max_new_tokens,
-                                'sampling_seed': request.sampling_seed},
-        }, config['request_timeout_seconds'])
-        text = response.get('text')
+        text, metadata = generate(
+            a.url + '/generate', request.input_token_ids,
+            {'temperature': temperature, 'max_new_tokens': request.max_new_tokens,
+             'sampling_seed': request.sampling_seed},
+            config['request_timeout_seconds'], record=request, rid=request.request_id)
         if not isinstance(text, str) or not text.strip():
             raise ValueError('empty model output')
         with lock:
             request.client_duration_ms = (time.monotonic() - start) * 1000
             request.output = text
-            request.engine_metadata = response.get('meta_info', {})
+            request.engine_metadata = metadata
             request.matched_prefix_tokens = request.engine_metadata.get('cached_tokens')
             request.transition('completed')
             write_dependency_graph()

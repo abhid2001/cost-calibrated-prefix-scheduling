@@ -1,7 +1,9 @@
 # Local Python environment and caches
-.venv/
-.cache/
-tmp/
+# No trailing slash: these may be symlinks into /projects (see README), and
+# a trailing slash only matches real directories.
+.venv
+.cache
+/tmp
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,7 +12,7 @@ __pycache__/
 
 # Generated data and experiment results; keep the dataset manifest
 /data/*.jsonl
-/results/
+/results
 /configs/installed-requirements.txt
 
 # Slurm output and local secrets
