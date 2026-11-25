@@ -1,0 +1,16 @@
+{
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "model_revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+  "dataset": "openai/gsm8k",
+  "dataset_revision": "740312add88f781978c0658806c59bc2815b9866",
+  "dataset_config": "main",
+  "manifest_seed": 20261114,
+  "development_count": 20,
+  "demonstration_count": 8,
+  "evaluation_count": 100,
+  "dtype": "bfloat16",
+  "sglang_version": "0.5.10.post1",
+  "max_new_tokens": 256,
+  "temperature": 0,
+  "request_timeout_seconds": 300
+}

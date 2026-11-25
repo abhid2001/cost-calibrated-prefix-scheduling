@@ -10,17 +10,24 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=pilot-%j.out
 set -euo pipefail
-source "${SLURM_SUBMIT_DIR:?}/scripts/experiment_common.sh"
-"$PY" scripts/check_cache.py --url "$URL" --out "$OUT/cache-proof.json"
-# Ten questions per condition; rates are pilot candidates, not selected experiment rates.
-head -n 10 data/development_questions.jsonl > "$OUT/pilot_questions.jsonl"
-for mode in self_consistency tot; do
-  for rate in 0.02 0.05 0.1; do
-    trace="$OUT/${mode}-${rate}-trace.jsonl"
-    "$PY" scripts/prepare_trace.py --questions "$OUT/pilot_questions.jsonl" --rate "$rate" --seed 20261114 --mode "$mode" --output "$trace"
-    curl -fsS -X POST "$URL/flush_cache" > "$OUT/${mode}-${rate}-cache-reset.txt"
-    "$PY" scripts/load_reasoning_trace.py --trace "$trace" --labels data/development_labels.jsonl --url "$URL" --out "$OUT/${mode}-${rate}"
-    "$PY" scripts/summarize.py --input "$OUT/${mode}-${rate}/questions.jsonl" --out "$OUT/${mode}-${rate}/summary.json"
-    "$PY" scripts/analyze_run.py --run "$OUT/${mode}-${rate}" --out "$OUT/${mode}-${rate}/analysis.json"
-  done
+
+source "${SLURM_SUBMIT_DIR:?}/scripts/live_experiment_common.sh"
+OUT="$PWD/results/pilot-${SLURM_JOB_ID}"
+mkdir -p "$OUT"
+trap stop_live_server EXIT
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
+"$PY" -c 'import csv,sys; rows=list(csv.reader(open(sys.argv[1]))); assert len(rows)==1 and "A100" in rows[0][0] and int(rows[0][1].split()[0])>=39000, rows' "$OUT/gpu.csv"
+MAX_NEW=$("$PY" -c 'import json; print(json.load(open("configs/foundation.json"))["max_new_tokens"])')
+for RATE in 0.20 0.50 1.00; do
+  RUN="$OUT/rate-$RATE"
+  TRACE="$RUN/trace.jsonl"
+  mkdir -p "$RUN"
+  "$PY" scripts/prepare_trace.py --questions data/development_questions.jsonl --limit 20 --rate "$RATE" --seed 20261114 --modes direct,cot,self_consistency,tot --output "$TRACE"
+  start_live_server fcfs "$RUN"
+  curl -fsS -X POST "$URL/flush_cache" > "$RUN/cache-reset.json"
+  "$PY" scripts/load_reasoning_trace.py --trace "$TRACE" --labels data/development_labels.jsonl --url "$URL" --out "$RUN/workload" --workers "${PILOT_WORKERS:-32}" --max-new-tokens "$MAX_NEW" --admission-log "$PREFIX_ADMISSION_LOG" --require-live-admissions
+  "$PY" scripts/analyze_run.py --run "$RUN/workload" --out "$RUN/analysis.json"
+  stop_live_server
 done
+"$PY" scripts/select_pilot_rate.py --analyses "$OUT/rate-*/analysis.json" --out "$OUT/pilot-selection.json"
+printf 'Pilot completed: %s\n' "$OUT"

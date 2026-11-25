@@ -1,5 +1,6 @@
 """Shared state, answer parsing, prompt construction, and HTTP transport."""
 import dataclasses
+from collections.abc import Mapping
 import datetime
 import decimal
 import json
@@ -22,6 +23,9 @@ class Request:
     parent_ids: list = dataclasses.field(default_factory=list)
     status: str = 'blocked'
     ready_at: Optional[str] = None
+    # Client dispatch and engine admission are distinct.  The latter is only
+    # populated when a live SGLang admission log is supplied by the runner.
+    dispatched_at: Optional[str] = None
     admitted_at: Optional[str] = None
     first_token_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -44,7 +48,7 @@ class Request:
         stamp = timestamp or now()
         self.status = state
         if state == 'ready': self.ready_at = stamp
-        if state == 'running': self.admitted_at = stamp
+        if state == 'running': self.dispatched_at = stamp
         if state in ('completed', 'failed'): self.finished_at = stamp
 
 
@@ -81,3 +85,15 @@ def post_json(url, data, timeout=300):
     request = urllib.request.Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def chat_token_ids(tokenizer, messages):
+    """Normalize chat-template outputs across Transformers versions."""
+    tokens = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+    if isinstance(tokens, Mapping): tokens = tokens["input_ids"]
+    if hasattr(tokens, "tolist"): tokens = tokens.tolist()
+    if isinstance(tokens, (list, tuple)) and len(tokens) == 1 and isinstance(tokens[0], (list, tuple)):
+        tokens = tokens[0]
+    if not isinstance(tokens, (list, tuple)) or not all(isinstance(x, int) and not isinstance(x, bool) for x in tokens):
+        raise ValueError("chat template returned invalid token IDs")
+    return list(tokens)

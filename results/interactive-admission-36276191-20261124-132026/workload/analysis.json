@@ -1,0 +1,23 @@
+{
+  "question_count": 4,
+  "question_failures": 3,
+  "accuracy_over_scored_questions": null,
+  "scored_questions": 0,
+  "latency_p50_seconds": 14.9640855,
+  "latency_p95_seconds": 14.965132,
+  "completed_questions_per_minute": 4.009263804947712,
+  "request_count": 12,
+  "request_failures": 0,
+  "reported_cache_tokens_total": 579,
+  "cache_telemetry_requests": 12,
+  "max_client_ready_to_dispatch_seconds": 0.056832,
+  "engine_admission_wait_p50_seconds": 1.5492219999999999,
+  "engine_admission_telemetry_requests": 12,
+  "evaluator_failures": 2,
+  "gpu_prefill_prediction_error": null,
+  "notes": [
+    "Failures included in question latency and accuracy when labels exist.",
+    "Ready-to-dispatch is client-side. Engine queue timing is reported only when the live admission log was joined.",
+    "GPU prefill prediction error unavailable without paired instrumentation."
+  ]
+}

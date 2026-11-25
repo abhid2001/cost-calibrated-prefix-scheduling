@@ -8,6 +8,11 @@ class CalibrationTests(unittest.TestCase):
         self.data=[{'length':100,'cached':20,'cold_prefill_ms':10,'warm_prefill_ms':8,'warm_cached_tokens':20}, {'length':200,'cached':100,'cold_prefill_ms':20,'warm_prefill_ms':12,'warm_cached_tokens':100}]
     def test_fit_validate_and_out_of_range(self):
         m=fit(self.data); self.assertEqual(m.predict(100,20),2);self.assertIsNone(m.predict(300,100)); self.assertEqual(validate(m,self.data)['mae_ms'],0)
+    def test_ranking_excludes_repeats_of_same_pair(self):
+        m=fit(self.data)
+        report=validate(m,[self.data[0],dict(self.data[0],cold_prefill_ms=11),self.data[1]])
+        self.assertEqual(report['ranking_comparisons'],2)
+        self.assertEqual(report['ranking_mistakes'],0)
     def test_bad_cache_rejected(self):
         x=dict(self.data[0],warm_cached_tokens=19)
         with self.assertRaises(ValueError):fit([x])

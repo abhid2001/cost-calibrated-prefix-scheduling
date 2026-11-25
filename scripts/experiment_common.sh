@@ -6,6 +6,8 @@ mkdir -p .cache/pip .cache/huggingface tmp
 export PIP_CACHE_DIR="$PWD/.cache/pip" HF_HOME="$PWD/.cache/huggingface" XDG_CACHE_HOME="$PWD/.cache" TMPDIR="$PWD/tmp" PIP_CONFIG_FILE=/dev/null
 export TRITON_CACHE_DIR="$PWD/.cache/triton" CUDA_CACHE_PATH="$PWD/.cache/cuda" TORCH_EXTENSIONS_DIR="$PWD/.cache/torch-extensions" FLASHINFER_WORKSPACE_DIR="$PWD/.cache/flashinfer"
 PY="$PWD/.venv/bin/python"
+export PATH="$PWD/.venv/bin:$PATH"
+source "$PWD/scripts/python_headers.sh"
 test -x "$PY" || { echo 'Missing project venv' >&2; exit 1; }
 test -f data/manifest.json || { echo 'Missing dataset manifest' >&2; exit 1; }
 OUT="${OUT:-$PWD/results/${SLURM_JOB_NAME}-${SLURM_JOB_ID}}"; mkdir -p "$OUT"

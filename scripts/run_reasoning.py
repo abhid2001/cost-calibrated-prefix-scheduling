@@ -2,7 +2,7 @@
 """Run self consistency or bounded ToT against the native SGLang API serially."""
 import argparse, dataclasses, json, pathlib, sys, time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
-from prefix_scheduler.core import post_json, normalize_number, now
+from prefix_scheduler.core import chat_token_ids, post_json, normalize_number, now
 from prefix_scheduler.reasoning import Controller
 from transformers import AutoTokenizer
 
@@ -22,7 +22,7 @@ out=pathlib.Path(a.out); out.mkdir(parents=True,exist_ok=True)
 
 def prepare(r, messages):
     r.prompt=tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    r.input_token_ids=tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+    r.input_token_ids=chat_token_ids(tokenizer, messages)
 
 def execute(r, messages, temperature):
     start=time.monotonic()

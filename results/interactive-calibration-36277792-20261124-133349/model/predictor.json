@@ -1,0 +1,245 @@
+{
+  "method": "inverse_distance_length_and_fraction_v1",
+  "points": [
+    {
+      "length": 60,
+      "cached": 15,
+      "saving_ms": 0.0
+    },
+    {
+      "length": 60,
+      "cached": 36,
+      "saving_ms": 0.0
+    },
+    {
+      "length": 61,
+      "cached": 15,
+      "saving_ms": 0.0
+    },
+    {
+      "length": 61,
+      "cached": 37,
+      "saving_ms": 0.0
+    },
+    {
+      "length": 67,
+      "cached": 17,
+      "saving_ms": 2.703871726989746
+    },
+    {
+      "length": 67,
+      "cached": 40,
+      "saving_ms": 3.363840103149414
+    },
+    {
+      "length": 68,
+      "cached": 17,
+      "saving_ms": 2.8805112838745117
+    },
+    {
+      "length": 68,
+      "cached": 41,
+      "saving_ms": 2.928640365600586
+    },
+    {
+      "length": 72,
+      "cached": 18,
+      "saving_ms": 2.7617273330688477
+    },
+    {
+      "length": 72,
+      "cached": 43,
+      "saving_ms": 2.9772796630859375
+    },
+    {
+      "length": 73,
+      "cached": 18,
+      "saving_ms": 8.714241027832031
+    },
+    {
+      "length": 73,
+      "cached": 44,
+      "saving_ms": 2.957310676574707
+    },
+    {
+      "length": 74,
+      "cached": 18,
+      "saving_ms": 2.8513288497924805
+    },
+    {
+      "length": 74,
+      "cached": 44,
+      "saving_ms": 2.9603843688964844
+    },
+    {
+      "length": 75,
+      "cached": 19,
+      "saving_ms": 2.82265567779541
+    },
+    {
+      "length": 75,
+      "cached": 45,
+      "saving_ms": 3.0187511444091797
+    },
+    {
+      "length": 274,
+      "cached": 68,
+      "saving_ms": 13.401084899902344
+    },
+    {
+      "length": 274,
+      "cached": 164,
+      "saving_ms": 22.596609115600586
+    },
+    {
+      "length": 275,
+      "cached": 69,
+      "saving_ms": 13.315071105957031
+    },
+    {
+      "length": 275,
+      "cached": 165,
+      "saving_ms": 22.56435203552246
+    },
+    {
+      "length": 281,
+      "cached": 70,
+      "saving_ms": 13.218816757202148
+    },
+    {
+      "length": 281,
+      "cached": 169,
+      "saving_ms": 22.47782325744629
+    },
+    {
+      "length": 282,
+      "cached": 70,
+      "saving_ms": 13.235712051391602
+    },
+    {
+      "length": 282,
+      "cached": 169,
+      "saving_ms": 22.512638092041016
+    },
+    {
+      "length": 286,
+      "cached": 72,
+      "saving_ms": 13.194751739501953
+    },
+    {
+      "length": 286,
+      "cached": 172,
+      "saving_ms": 22.727680206298828
+    },
+    {
+      "length": 287,
+      "cached": 72,
+      "saving_ms": 13.115903854370117
+    },
+    {
+      "length": 287,
+      "cached": 172,
+      "saving_ms": 22.609919548034668
+    },
+    {
+      "length": 288,
+      "cached": 72,
+      "saving_ms": 13.222911834716797
+    },
+    {
+      "length": 288,
+      "cached": 173,
+      "saving_ms": 22.624767303466797
+    },
+    {
+      "length": 289,
+      "cached": 72,
+      "saving_ms": 13.196285247802734
+    },
+    {
+      "length": 289,
+      "cached": 173,
+      "saving_ms": 22.24947166442871
+    },
+    {
+      "length": 447,
+      "cached": 112,
+      "saving_ms": 15.182332992553711
+    },
+    {
+      "length": 447,
+      "cached": 268,
+      "saving_ms": 29.193729400634766
+    },
+    {
+      "length": 448,
+      "cached": 112,
+      "saving_ms": 15.05331039428711
+    },
+    {
+      "length": 448,
+      "cached": 269,
+      "saving_ms": 29.21369743347168
+    },
+    {
+      "length": 454,
+      "cached": 114,
+      "saving_ms": 14.988800048828125
+    },
+    {
+      "length": 454,
+      "cached": 272,
+      "saving_ms": 29.202430725097656
+    },
+    {
+      "length": 455,
+      "cached": 114,
+      "saving_ms": 15.049726486206055
+    },
+    {
+      "length": 455,
+      "cached": 273,
+      "saving_ms": 29.18860626220703
+    },
+    {
+      "length": 459,
+      "cached": 115,
+      "saving_ms": 15.13011360168457
+    },
+    {
+      "length": 459,
+      "cached": 275,
+      "saving_ms": 32.18022346496582
+    },
+    {
+      "length": 460,
+      "cached": 115,
+      "saving_ms": 15.26272201538086
+    },
+    {
+      "length": 460,
+      "cached": 276,
+      "saving_ms": 32.37631607055664
+    },
+    {
+      "length": 461,
+      "cached": 115,
+      "saving_ms": 15.22585678100586
+    },
+    {
+      "length": 461,
+      "cached": 277,
+      "saving_ms": 32.18739128112793
+    },
+    {
+      "length": 462,
+      "cached": 116,
+      "saving_ms": 15.229949951171875
+    },
+    {
+      "length": 462,
+      "cached": 277,
+      "saving_ms": 32.17868995666504
+    }
+  ]
+}

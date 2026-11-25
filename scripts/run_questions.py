@@ -2,7 +2,7 @@
 """Serial direct and CoT runners; timestamps are client-side observations."""
 import argparse, dataclasses, hashlib, json, pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'src'))
-from prefix_scheduler.core import Request, now, parse_answer, post_json, prompt_for
+from prefix_scheduler.core import chat_token_ids, Request, now, parse_answer, post_json, prompt_for
 from transformers import AutoTokenizer
 
 p = argparse.ArgumentParser()
@@ -29,7 +29,7 @@ with (out/'requests.jsonl').open('w') as requests, (out/'questions.jsonl').open(
         try:
             messages = prompt_for(q['question'], a.mode)
             record.prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            record.input_token_ids = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+            record.input_token_ids = chat_token_ids(tokenizer, messages)
             record.transition('ready'); record.transition('running')
             result = post_json(a.url + '/generate', {'input_ids': record.input_token_ids,
                 'sampling_params': {'temperature': c['temperature'], 'max_new_tokens': record.max_new_tokens, 'sampling_seed': seed}}, c['request_timeout_seconds'])

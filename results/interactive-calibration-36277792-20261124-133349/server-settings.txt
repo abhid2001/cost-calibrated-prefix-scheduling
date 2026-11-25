@@ -1,0 +1,8 @@
+GPU: A100 3g.20gb MIG
+dtype: bfloat16
+max running requests: 1
+max total tokens: 4096
+context length: 4096
+CUDA graphs: disabled (including piecewise)
+host compiler: GCC 10.2.0
+static memory fraction: 0.80

@@ -4,7 +4,7 @@ An experimental LLM inference project that studies whether estimating the GPU pr
 
 The code includes direct and chain-of-thought (CoT) answers, three-sample self-consistency, a bounded Tree of Thoughts (ToT) controller, and standalone FCFS, k-LPM, and calibrated ranking policies. The experiment compares answer quality and runtime under fixed reasoning budgets.
 
-**Project status:** The reasoning runners and standalone policies have local tests. The foundation job reached an A100, but its model server was killed before completing a request. Live scheduler integration, GPU prefill instrumentation, calibration, and the scheduler experiments are still in progress. No scheduler performance results have been established.
+**Project status:** The reasoning runners and standalone policies have local tests. An interactive 20 GB A100 MIG smoke test completed direct and CoT requests and verified prefix-cache reuse. The full 40 GB foundation job has not yet passed. Opt-in GPU prefill telemetry, real-prompt held-out calibration, and the constrained live FCFS, k-LPM, calibrated, and dependency-aware paths have passed interactive smoke tests. Scheduler experiments are still in progress. No scheduler performance results have been established.
 
 ---
 
@@ -23,12 +23,12 @@ scheduler/
 │   ├── run_questions.py             # Direct and CoT inference
 │   ├── run_reasoning.py             # Self-consistency and bounded ToT
 │   ├── prepare_trace.py             # Generate reproducible arrivals
-│   ├── load_reasoning_trace.py      # Run reasoning workloads
+│   ├── load_reasoning_trace.py      # Concurrent materialized-DAG live workload driver
 │   ├── collect_calibration.py       # Collect instrumented prefill timings
 │   ├── fit_calibration.py           # Fit and validate the predictor
 │   ├── pilot.slurm                  # Pilot workload on an A100
 │   ├── reasoning_comparison.slurm   # Four-mode comparison
-│   └── scheduler_matrix.slurm       # Blocked scheduler matrix placeholder
+│   └── scheduler_matrix.slurm       # Reserved scheduler-matrix entrypoint
 ├── src/prefix_scheduler/            # Request records, controllers, and policies
 ├── tests/                           # Unit and mock-server tests
 └── results/                         # Generated results (Git ignored)
@@ -57,9 +57,10 @@ export PIP_CACHE_DIR="$PWD/.cache/pip" HF_HOME="$PWD/.cache/huggingface"
 export XDG_CACHE_HOME="$PWD/.cache" TMPDIR="$PWD/tmp" PIP_CONFIG_FILE=/dev/null
 export TRITON_CACHE_DIR="$PWD/.cache/triton" CUDA_CACHE_PATH="$PWD/.cache/cuda"
 export TORCH_EXTENSIONS_DIR="$PWD/.cache/torch-extensions" FLASHINFER_WORKSPACE_DIR="$PWD/.cache/flashinfer"
+export TVM_FFI_CACHE_DIR="$PWD/.cache/tvm-ffi"
 ```
 
-The setup pins SGLang `0.5.10.post1` and `datasets` `3.6.0`. Model and dataset revisions are recorded in `configs/foundation.json`. `configs/environment-snapshot.txt` records one resolved environment; it is not a GPU-validated lockfile.
+The setup pins SGLang `0.5.10.post1` and `datasets` `3.6.0`. Model and dataset revisions are recorded in `configs/foundation.json`. `configs/environment-snapshot.txt` records one resolved environment; it is not a GPU-validated lockfile. On systems without Python development headers, GPU jobs also require matching headers: `scripts/python_headers.sh` checks the system include directory and can use the project-local `.cache/python-devel/usr/include/python3.11` fallback. For the current Alpine Python 3.11.13 environment, that fallback was extracted from the matching Rocky Linux `python3.11-devel-3.11.13-2.el8_10.x86_64` RPM and includes the system `pyconfig-64.h`. The cache is not tracked; provision matching headers on a fresh setup.
 
 ### 2. Prepare GSM8K
 
@@ -88,6 +89,8 @@ sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
 
 The job requests one full 40 GB A100, launches SGLang, sends the same tokenized prompt twice, and checks the engine's cached-token telemetry. It then runs development questions in direct and CoT modes. Results and logs are saved in `results/foundation-<job-id>/`. The pinned model must be available in the project Hugging Face cache or downloadable from the compute node.
 
+For a 20 GB A100 MIG interactive smoke test, run `scripts/interactive_foundation.sh` from an existing allocation. This uses a smaller KV cache and disables CUDA graphs; it is not equivalent to the full 40 GB experiment configuration. On Alpine, the script selects GCC 10 and its C++ runtime for CUDA JIT compilation and keeps TVM's build cache under the project directory.
+
 ### 5. Run Reasoning Workloads
 
 With an SGLang server running at `http://127.0.0.1:30000`:
@@ -108,16 +111,25 @@ Self-consistency votes over three complete solutions. The ToT controller generat
 
 ```bash
 python scripts/prepare_trace.py --questions data/development_questions.jsonl \
-  --rate 0.2 --seed 20261114 --mode tot --output data/tot_trace.jsonl
-python scripts/load_reasoning_trace.py --trace data/tot_trace.jsonl \
-  --labels data/development_labels.jsonl --out results/tot-load
-python scripts/summarize.py --input results/tot-load/questions.jsonl \
-  --out results/tot-load/summary.json
+  --rate 0.2 --seed 20261114 --modes direct,cot,self_consistency,tot \
+  --output data/mixed_trace.jsonl
+python scripts/load_reasoning_trace.py --trace data/mixed_trace.jsonl \
+  --labels data/development_labels.jsonl --out results/mixed-load
+python scripts/analyze_run.py --run results/mixed-load \
+  --out results/mixed-load/analysis.json
 ```
 
-The runner supports all four modes and concurrent question arrivals. Calls within each question are currently sequential. Request and question logs include outputs, failures, dependencies, and client-side timing.
+The runner materializes each complete graph before its question arrives: one Direct node, one CoT node, three self-consistency samples, or all seven bounded-ToT nodes. It dispatches every ready node through a bounded concurrent HTTP executor; a child becomes ready only after its recorded parents complete, while parent failure recursively marks descendants failed without sending them to the engine. Request, question, and `events.jsonl` logs preserve IDs, dependencies, state transitions, and client timestamps.
 
-### 7. Run the Pilot
+### 7. Run the Full-A100 Foundation Check
+
+The foundation script now uses the same project-local compiler, C++ runtime, caches, conservative memory fraction, and no-overlap/no-chunk constraints as the validated live path. It must run on a full 40 GB A100; the 20 GB `gpu-testing` MIG QoS cannot validate it.
+
+```bash
+sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
+```
+
+### 8. Run the Pilot
 
 After the foundation job succeeds, submit the pilot:
 
@@ -125,7 +137,19 @@ After the foundation job succeeds, submit the pilot:
 sbatch --account=YOUR_ACCOUNT scripts/pilot.slurm
 ```
 
-The pilot tests self-consistency and ToT on development questions at three candidate arrival rates. Use its results to size later reservations and choose a workload rate. `scripts/reasoning_comparison.slurm` is prepared for a four-mode FCFS comparison using frozen evaluation traces.
+The pilot runs a frozen mixed Direct/CoT/self-consistency/ToT development trace at 0.20, 0.50, and 1.00 arrivals per second against the same constrained live FCFS engine used for the matrix. It records admission logs and selects the highest rate with complete engine telemetry, no request failures, a nonzero queue wait, and bounded p95 engine wait. Its `pilot-selection.json` is the required input to the primary matrix.
+
+### 9. Run the Primary Scheduler Matrix
+
+Keep calibration development-only. The matrix accepts only a predictor whose sibling `validation.json` has `acceptance.accepted: true`, copies both immutable artifacts into the output directory, freezes one 100-question mixed evaluation trace from the pilot-selected rate, and runs FCFS, k-LPM, calibrated, and dependency-aware sequentially from a cold cache.
+
+```bash
+PILOT_SELECTION="$PWD/results/pilot-<job-id>/pilot-selection.json" \
+DEVELOPMENT_PREDICTOR="$PWD/results/interactive-calibration-<job-id>-<time>/model/predictor.json" \
+sbatch --account=YOUR_ACCOUNT scripts/scheduler_matrix.slurm
+```
+
+Each policy receives the same trace hash, seed, token budget, server constraints, cache reset, and accepted predictor. `matrix-summary.json` reports question latency, engine admission wait, throughput, failures, cache telemetry, GPU prefill timing, calibration fallback/coverage, accuracy, dependency decisions, unlock counts, and fairness-cycle errors. The matrix is an experiment, not a claim that dependency-aware scheduling improves performance.
 
 ---
 
@@ -133,9 +157,52 @@ The pilot tests self-consistency and ToT on development questions at three candi
 
 The standalone policies use an oldest-first admission followed by `k - 1` cache-ranked admissions, with `k = 4` by default. The k-LPM implementation offers cached-token ratio and matched-token count scores; the ratio is a provisional interpretation of the paper's cache-hit signal. Ties are resolved by ready time and request ID. The pinned SGLang LPM implementation instead sorts by matched-token count and preserves existing queue order for equal keys.
 
-The calibrated policy uses a lookup predictor fitted from paired cold and warm prefill timings. If a prediction is unavailable, it falls back to the baseline score. **These policies are not yet connected to SGLang's live admission loop.**
+The calibrated policy uses a lookup predictor fitted from paired cold and warm prefill timings. If a prediction is unavailable, it falls back to the baseline score. `interactive_calibration.sh` builds varied tokenized GSM8K chat prompts (zero, two, and four real demonstration questions), repeats cold/warm measurements, and accepts a predictor only after disjoint held-out prompt IDs satisfy the configured coverage, MAE, and ranking-error gate. This validates a constrained MIG predictor; repeat calibration on the final workload and full A100 before reporting scheduler performance.
 
-`collect_calibration.py` expects GPU prefill timing in the engine response and flushes the server cache between measurements. The pinned engine has not yet been instrumented to provide that timing, so collection and predictor validation remain blocked. Client request latency must not be used as GPU prefill time. `scripts/scheduler_matrix.slurm` exits until live admission control and timing instrumentation are implemented.
+An optional `dependency-aware` policy adds a configurable per-unlocked-child bonus (in milliseconds) to the predicted saving on cache-ranked admissions. It keeps the same oldest-first cycle and falls back to the baseline for the whole choice when prediction or dependency information is unavailable. The workload driver atomically publishes its complete materialized graph (IDs, parent IDs, and states) to the engine hook. The hook counts a blocked child only if every other parent completed, logs the count and dependency score, and falls back uniformly if its predictor or graph snapshot is unavailable. It is an optional fourth policy, not a replacement for the three required policies.
+
+
+`scripts/install_prefill_instrumentation.py` applies an opt-in patch to the pinned SGLang 0.5.10.post1 environment and saves the original engine files in the ignored `patches/sglang-original/` directory. Enable it with `PREFIX_GPU_PREFILL_TIMING=1` and run with one GPU, `--max-running-requests 1`, `--chunked-prefill-size -1`, and `--disable-overlap-schedule`; incompatible settings fail. The patch records synchronized CUDA events around the model forward on its current stream, before token sampling, and exposes `meta_info.prefill_gpu_ms` on non-streaming responses. Event timing includes GPU work and stream idle gaps within that forward interval; it is not client TTFT. CUDA graph and piecewise graph settings must remain fixed for paired measurements.
+
+`scripts/interactive_prefill.sh` launches a dedicated 20 GB MIG server with those constraints and validates cold and warm telemetry. One interactive smoke test passed with 700 cached tokens; these individual timings are not a performance comparison. `collect_calibration.py` flushes the server cache between paired measurements, so use only a dedicated server. A preliminary 20 GB MIG calibration and held-out validation have been run; more varied prompts and repeated measurements are needed before relying on the predictor.
+
+### Live admission validation
+
+The pinned engine can use the FCFS, k-LPM, or calibrated policy in its actual prefill admission loop. This is an opt-in experimental patch for the constrained, one-GPU/one-running-request/no-overlap/unchunked configuration above; it is deliberately not enabled for general SGLang serving. Install the prefill instrumentation first, then the admission patch:
+
+```bash
+.venv/bin/python scripts/install_prefill_instrumentation.py
+.venv/bin/python scripts/install_live_admission.py
+PREFIX_ADMISSION_POLICY=k-lpm bash scripts/interactive_admission.sh
+# Or, with a fitted predictor:
+PREFIX_ADMISSION_POLICY=calibrated PREFIX_PREDICTOR_PATH=/absolute/path/to/predictor.json \
+  bash scripts/interactive_admission.sh
+```
+
+Run the script only inside the documented interactive A100 allocation. It primes a real prefix and submits contending prompts with different matched-prefix lengths. The JSONL log records every candidate's live radix-cache match, score, fairness slot, ranked order, and the request actually accepted by SGLang. The validator independently recomputes each ranking, verifies the oldest-first cycle advances only after an actual admission, and compares each selected request's log entry with SGLang's `cached_tokens` response telemetry. The saved `responses.json` and `admissions.jsonl` are the run evidence. This establishes scheduling correctness under the stated constraints; it is not yet a performance result or a general multi-request admission controller.
+
+To run a materialized four-mode workload through that same patched server, create a mixed trace and set `WORKLOAD_TRACE` when launching the interactive script:
+
+```bash
+.venv/bin/python scripts/prepare_trace.py --questions data/development_questions.jsonl \
+  --limit 4 --rate 1000 --modes direct,cot,self_consistency,tot \
+  --output results/live-smoke-trace.jsonl
+WORKLOAD_TRACE="$PWD/results/live-smoke-trace.jsonl" WORKLOAD_WORKERS=7 \
+  WORKLOAD_MAX_NEW_TOKENS=64 PREFIX_ADMISSION_POLICY=k-lpm \
+  bash scripts/interactive_admission.sh
+```
+
+This mode requires one live admission entry for every dispatched request. It writes `workload/requests.jsonl`, `questions.jsonl`, `events.jsonl`, and the filtered `admissions.jsonl`; `admitted_at` is populated only from engine telemetry, while `dispatched_at` remains the client timestamp. The 64-token value is a constrained 20 GB MIG smoke-test budget, not the evaluation budget.
+
+To enable the optional fourth policy, use an accepted predictor and a nonnegative unlock bonus. The script publishes the graph sidecar before dispatch and requires every request to have a live admission record:
+
+```bash
+WORKLOAD_TRACE="$PWD/results/live-smoke-trace.jsonl" WORKLOAD_WORKERS=7 \
+  WORKLOAD_MAX_NEW_TOKENS=64 PREFIX_ADMISSION_POLICY=dependency-aware \
+  PREFIX_PREDICTOR_PATH="$PWD/results/interactive-calibration-<job-id>-<time>/model/predictor.json" \
+  PREFIX_DEPENDENCY_UNLOCK_BONUS_MS=5 \
+  bash scripts/interactive_admission.sh
+```
 
 ---
 

@@ -17,7 +17,12 @@ export PIP_CACHE_DIR="$PWD/.cache/pip" HF_HOME="$PWD/.cache/huggingface"
 export XDG_CACHE_HOME="$PWD/.cache" TMPDIR="$PWD/tmp" PIP_CONFIG_FILE=/dev/null
 export TRITON_CACHE_DIR="$PWD/.cache/triton" CUDA_CACHE_PATH="$PWD/.cache/cuda"
 export TORCH_EXTENSIONS_DIR="$PWD/.cache/torch-extensions" FLASHINFER_WORKSPACE_DIR="$PWD/.cache/flashinfer"
+export TVM_FFI_CACHE_DIR="$PWD/.cache/tvm-ffi"
 PY="$PWD/.venv/bin/python"
+export PATH="$PWD/.venv/bin:/curc/sw/gcc/10.2.0/bin:$PATH"
+export CC=/curc/sw/gcc/10.2.0/bin/gcc CXX=/curc/sw/gcc/10.2.0/bin/g++ NVCC_CCBIN=/curc/sw/gcc/10.2.0/bin/g++
+export LD_LIBRARY_PATH="/curc/sw/gcc/10.2.0/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+source "$PWD/scripts/python_headers.sh"
 test -x "$PY" || { echo 'Run scripts/setup_env.sh first' >&2; exit 1; }
 test -f data/development_questions.jsonl || { echo 'Run scripts/prepare_data.py first' >&2; exit 1; }
 OUT="results/foundation-${SLURM_JOB_ID}"; mkdir -p "$OUT"
@@ -33,9 +38,11 @@ scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
 cp configs/foundation.json "$OUT/config.json"
 "$PY" -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct \
   --revision a09a35458c702b33eeacc393d103063234e8bc28 --dtype bfloat16 \
-  --host 127.0.0.1 --port "$PORT" --max-running-requests 1 > "$OUT/server.log" 2>&1 &
+  --host 127.0.0.1 --port "$PORT" --max-running-requests 1 --mem-fraction-static 0.80 \
+  --max-total-tokens 16384 --context-length 4096 --disable-cuda-graph --disable-piecewise-cuda-graph \
+  --disable-overlap-schedule --chunked-prefill-size -1 > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+trap 'status=$?; kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; if [[ $status -ne 0 ]]; then tail -120 "$OUT/server.log" >&2 || true; fi; exit $status' EXIT
 ready=0
 for ((i=0; i<180; i++)); do
   if curl -fsS "$URL/health" >/dev/null 2>&1; then ready=1; break; fi

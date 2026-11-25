@@ -7,7 +7,7 @@ class CoreTests(unittest.TestCase):
         r=Request('q','r','direct','a','b')
         with self.assertRaises(ValueError): r.transition('running')
         r.transition('ready','c'); r.transition('running','d'); r.transition('completed','e')
-        self.assertEqual((r.ready_at,r.admitted_at,r.finished_at),('c','d','e'))
+        self.assertEqual((r.ready_at,r.dispatched_at,r.admitted_at,r.finished_at),('c','d',None,'e'))
         with self.assertRaises(ValueError): r.transition('ready')
     def test_failure_from_blocked(self):
         r=Request('q','r','direct','a','b'); r.transition('failed','c')

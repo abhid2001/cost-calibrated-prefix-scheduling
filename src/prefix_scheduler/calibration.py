@@ -37,7 +37,10 @@ def fit(pairs):
         if not all(math.isfinite(x) and x>=0 for x in (cold,warm)) or l<=0 or c<=0 or c>=l: raise ValueError('invalid timing pair')
         if int(p['warm_cached_tokens']) != c: raise ValueError('observed cache match differs from requested length')
         grouped.setdefault((l,c),[]).append(cold-warm)
-    return LookupPredictor([{'length':l,'cached':c,'saving_ms':median(values)} for (l,c),values in grouped.items()])
+    # A warm run can be slower from measurement noise; a saved prefill benefit
+    # is physically nonnegative and the scheduler must never rank a penalty as
+    # a benefit.
+    return LookupPredictor([{'length':l,'cached':c,'saving_ms':max(0.0,median(values))} for (l,c),values in grouped.items()])
 
 def validate(predictor, pairs):
     results=[]
@@ -50,6 +53,7 @@ def validate(predictor, pairs):
     covered = [r for r in results if r['predicted_ms'] is not None]
     for i, left in enumerate(covered):
         for right in covered[i+1:]:
+            if (left['length'], left['cached']) == (right['length'], right['cached']): continue
             observed = left['observed_ms'] - right['observed_ms']
             predicted = left['predicted_ms'] - right['predicted_ms']
             if observed == 0: continue

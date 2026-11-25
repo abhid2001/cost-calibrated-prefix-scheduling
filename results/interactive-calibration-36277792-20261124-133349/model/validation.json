@@ -1,0 +1,240 @@
+{
+  "count": 32,
+  "covered": 32,
+  "mae_ms": 1.7659784851895646,
+  "ranking_comparisons": 480,
+  "ranking_mistakes": 102,
+  "predictions": [
+    {
+      "length": 124,
+      "cached": 31,
+      "predicted_ms": 4.258191161483955,
+      "observed_ms": -0.08908843994140625,
+      "error_ms": 4.347279601425361
+    },
+    {
+      "length": 124,
+      "cached": 31,
+      "predicted_ms": 4.258191161483955,
+      "observed_ms": 8.08243179321289,
+      "error_ms": -3.8242406317289355
+    },
+    {
+      "length": 124,
+      "cached": 74,
+      "predicted_ms": 2.9790916652113903,
+      "observed_ms": 2.8661746978759766,
+      "error_ms": 0.11291696733541379
+    },
+    {
+      "length": 124,
+      "cached": 74,
+      "predicted_ms": 2.9790916652113903,
+      "observed_ms": 2.8241920471191406,
+      "error_ms": 0.15489961809224972
+    },
+    {
+      "length": 338,
+      "cached": 84,
+      "predicted_ms": 13.18303277354806,
+      "observed_ms": 13.562881469726562,
+      "error_ms": -0.37984869617850237
+    },
+    {
+      "length": 338,
+      "cached": 84,
+      "predicted_ms": 13.18303277354806,
+      "observed_ms": 13.494270324707031,
+      "error_ms": -0.3112375511589711
+    },
+    {
+      "length": 338,
+      "cached": 203,
+      "predicted_ms": 22.545870492793664,
+      "observed_ms": 14.21004867553711,
+      "error_ms": 8.335821817256555
+    },
+    {
+      "length": 338,
+      "cached": 203,
+      "predicted_ms": 22.545870492793664,
+      "observed_ms": 14.11276626586914,
+      "error_ms": 8.433104226924524
+    },
+    {
+      "length": 123,
+      "cached": 31,
+      "predicted_ms": 4.256901416633135,
+      "observed_ms": -0.3737602233886719,
+      "error_ms": 4.630661640021807
+    },
+    {
+      "length": 123,
+      "cached": 31,
+      "predicted_ms": 4.256901416633135,
+      "observed_ms": -0.6246395111083984,
+      "error_ms": 4.881540927741534
+    },
+    {
+      "length": 123,
+      "cached": 74,
+      "predicted_ms": 2.9791143169316348,
+      "observed_ms": 2.792448043823242,
+      "error_ms": 0.18666627310839257
+    },
+    {
+      "length": 123,
+      "cached": 74,
+      "predicted_ms": 2.9791143169316348,
+      "observed_ms": 2.846719741821289,
+      "error_ms": 0.1323945751103457
+    },
+    {
+      "length": 337,
+      "cached": 84,
+      "predicted_ms": 13.183043447441381,
+      "observed_ms": 13.54751968383789,
+      "error_ms": -0.3644762363965093
+    },
+    {
+      "length": 337,
+      "cached": 84,
+      "predicted_ms": 13.183043447441381,
+      "observed_ms": 13.544448852539062,
+      "error_ms": -0.36140540509768115
+    },
+    {
+      "length": 337,
+      "cached": 202,
+      "predicted_ms": 22.545698565669767,
+      "observed_ms": 14.343170166015625,
+      "error_ms": 8.202528399654142
+    },
+    {
+      "length": 337,
+      "cached": 202,
+      "predicted_ms": 22.545698565669767,
+      "observed_ms": 14.087169647216797,
+      "error_ms": 8.45852891845297
+    },
+    {
+      "length": 72,
+      "cached": 18,
+      "predicted_ms": 2.7617273330688477,
+      "observed_ms": 2.9368324279785156,
+      "error_ms": -0.17510509490966797
+    },
+    {
+      "length": 72,
+      "cached": 18,
+      "predicted_ms": 2.7617273330688477,
+      "observed_ms": 2.7453441619873047,
+      "error_ms": 0.01638317108154297
+    },
+    {
+      "length": 72,
+      "cached": 43,
+      "predicted_ms": 2.9772796630859375,
+      "observed_ms": 3.328001022338867,
+      "error_ms": -0.3507213592529297
+    },
+    {
+      "length": 72,
+      "cached": 43,
+      "predicted_ms": 2.9772796630859375,
+      "observed_ms": 2.913280487060547,
+      "error_ms": 0.06399917602539062
+    },
+    {
+      "length": 286,
+      "cached": 72,
+      "predicted_ms": 13.194751739501953,
+      "observed_ms": 13.199359893798828,
+      "error_ms": -0.004608154296875
+    },
+    {
+      "length": 286,
+      "cached": 72,
+      "predicted_ms": 13.194751739501953,
+      "observed_ms": 13.210624694824219,
+      "error_ms": -0.015872955322265625
+    },
+    {
+      "length": 286,
+      "cached": 172,
+      "predicted_ms": 22.727680206298828,
+      "observed_ms": 22.64985466003418,
+      "error_ms": 0.07782554626464844
+    },
+    {
+      "length": 286,
+      "cached": 172,
+      "predicted_ms": 22.727680206298828,
+      "observed_ms": 22.671358108520508,
+      "error_ms": 0.05632209777832031
+    },
+    {
+      "length": 71,
+      "cached": 18,
+      "predicted_ms": 3.6709232773808216,
+      "observed_ms": 2.837503433227539,
+      "error_ms": 0.8334198441532825
+    },
+    {
+      "length": 71,
+      "cached": 18,
+      "predicted_ms": 3.6709232773808216,
+      "observed_ms": 2.5047035217285156,
+      "error_ms": 1.166219755652306
+    },
+    {
+      "length": 71,
+      "cached": 43,
+      "predicted_ms": 2.9614166198642304,
+      "observed_ms": 3.044353485107422,
+      "error_ms": -0.08293686524319144
+    },
+    {
+      "length": 71,
+      "cached": 43,
+      "predicted_ms": 2.9614166198642304,
+      "observed_ms": 3.2348155975341797,
+      "error_ms": -0.27339897766994925
+    },
+    {
+      "length": 285,
+      "cached": 71,
+      "predicted_ms": 13.183849148472717,
+      "observed_ms": 13.271038055419922,
+      "error_ms": -0.08718890694720471
+    },
+    {
+      "length": 285,
+      "cached": 71,
+      "predicted_ms": 13.183849148472717,
+      "observed_ms": 13.20755386352539,
+      "error_ms": -0.023704715052673464
+    },
+    {
+      "length": 285,
+      "cached": 171,
+      "predicted_ms": 22.675536933754625,
+      "observed_ms": 22.544382095336914,
+      "error_ms": 0.1311548384177108
+    },
+    {
+      "length": 285,
+      "cached": 171,
+      "predicted_ms": 22.675536933754625,
+      "observed_ms": 22.64063835144043,
+      "error_ms": 0.03489858231419518
+    }
+  ],
+  "acceptance": {
+    "accepted": true,
+    "min_heldout_coverage": 0.8,
+    "max_heldout_mae_ms": 40.0,
+    "max_ranking_error_rate": 0.5,
+    "observed_ranking_error_rate": 0.2125
+  }
+}
