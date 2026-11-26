@@ -58,6 +58,7 @@ class Request:
 
 NUMBER = re.compile(r'(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\w])')
 FINAL = re.compile(r'(?:final\s+answer\s*[:=]|####)\s*([^\n]+)', re.I)
+BOXED = re.compile(r'\\boxed\s*\{\s*([^{}]+?)\s*\}', re.I)
 
 def normalize_number(text):
     """Return a canonical decimal string only for one whole numeric value."""
@@ -71,9 +72,12 @@ def normalize_number(text):
         return None
 
 def parse_answer(text):
-    matches = FINAL.findall(text or '')
-    if not matches: return None
-    numbers = NUMBER.findall(matches[-1])
+    text = text or ''
+    matches = FINAL.findall(text)
+    boxed = BOXED.findall(text)
+    candidate = matches[-1] if matches else (boxed[-1] if boxed else None)
+    if candidate is None: return None
+    numbers = NUMBER.findall(candidate)
     return normalize_number(numbers[0]) if len(numbers) == 1 else None
 
 def prompt_for(question, mode):

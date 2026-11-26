@@ -16,6 +16,8 @@ class CoreTests(unittest.TestCase):
     def test_answers(self):
         self.assertEqual(parse_answer('steps\nFinal answer: -1,234.50'), '-1234.5')
         self.assertEqual(parse_answer('#### 0'), '0')
+        self.assertEqual(parse_answer('Therefore, the result is \\boxed{142}.'), '142')
+        self.assertIsNone(parse_answer('\\boxed{1 or 2}'))
         self.assertIsNone(parse_answer('steps 42'))
         self.assertIsNone(parse_answer('Final answer: 1 or 2'))
         self.assertEqual(normalize_number('100.00'), '100')
