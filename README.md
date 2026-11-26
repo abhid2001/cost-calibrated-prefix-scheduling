@@ -148,7 +148,7 @@ Then submit the pilot:
 sbatch --account=YOUR_ACCOUNT scripts/pilot.slurm
 ```
 
-The pilot runs a frozen mixed Direct/CoT/self-consistency/ToT development trace at 0.20, 0.50, and 1.00 arrivals per second against the same constrained live FCFS engine used for the matrix. It records admission logs and selects the highest rate with complete engine telemetry, no request failures, a nonzero queue wait, and bounded p95 engine wait. Its `pilot-selection.json` is the required input to the primary matrix.
+The pilot runs a frozen mixed Direct/CoT/self-consistency/ToT development trace at 0.20, 0.50, and 1.00 arrivals per second against the same constrained live FCFS engine used for the matrix. It records admission logs and selects the highest rate with complete engine telemetry, no request failures, a nonzero queue wait, and p95 engine wait at or below 10 seconds. Its `pilot-selection.json` records those thresholds and is the required input to the primary matrix.
 
 ### 9. Run the Primary Scheduler Matrix
 

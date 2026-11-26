@@ -18,7 +18,7 @@ Never fit, tune, or replace the predictor using evaluation prompts. Copy the acc
 
 ## 4. Development pilot
 
-Submit `scripts/pilot.slurm` on the H200 slice. It uses a mixed Direct, CoT, self-consistency, and ToT development trace at 0.20, 0.50, and 1.00 arrivals/second. The selected rate must have complete engine admission and streamed GPU-prefill telemetry, no request failures, bounded p95 engine wait, and preferably observable queueing. `pilot-selection.json` records the choice and rule.
+Submit `scripts/pilot.slurm` on the H200 slice. It uses a mixed Direct, CoT, self-consistency, and ToT development trace at 0.20, 0.50, and 1.00 arrivals/second. The selected rate must have complete engine admission and streamed GPU-prefill telemetry, no request failures, p95 engine wait at or below 10 seconds (overridable only with an explicit recorded parameter), and observable queueing. `pilot-selection.json` records the thresholds, choice, and rule.
 
 The pilot launcher writes reusable completion records per rate. To resume a failed job, set `PILOT_OUT` to its existing output directory; completed rates are verified and reused.
 

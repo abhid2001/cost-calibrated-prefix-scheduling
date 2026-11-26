@@ -43,6 +43,8 @@ for RATE in 0.20 0.50 1.00; do
     exit "$status"
   fi
 done
-"$PY" scripts/select_pilot_rate.py --analyses "$OUT/rate-*/analysis.json" --out "$OUT/pilot-selection.json"
+"$PY" scripts/select_pilot_rate.py --analyses "$OUT/rate-*/analysis.json" --out "$OUT/pilot-selection.json" \
+  --min-queue-wait-seconds "${PILOT_MIN_QUEUE_WAIT_SECONDS:-0.01}" \
+  --max-p95-queue-wait-seconds "${PILOT_MAX_P95_QUEUE_WAIT_SECONDS:-10}"
 "$PY" scripts/record_run.py --out "$OUT/completed-run.json" --kind pilot --status completed --config configs/foundation.json --hardware "$OUT/gpu.csv" --note 'Each rate has an independently reusable completion record.'
 printf 'Pilot completed: %s\n' "$OUT"

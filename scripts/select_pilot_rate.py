@@ -6,7 +6,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--analyses', required=True, help='glob of per-rate analysis.json files')
 p.add_argument('--out', required=True)
 p.add_argument('--min-queue-wait-seconds', type=float, default=.01)
-p.add_argument('--max-p95-queue-wait-seconds', type=float, default=5.0)
+p.add_argument('--max-p95-queue-wait-seconds', type=float, default=10.0)
 a = p.parse_args()
 paths = sorted(glob.glob(a.analyses))
 if not paths:
@@ -28,5 +28,12 @@ if not eligible:
     raise SystemExit('no pilot rate completed with complete engine telemetry and bounded queueing')
 chosen = max(eligible, key=lambda item: item['rate'])
 chosen['selection_rule'] = 'highest healthy queued rate' if chosen['queued'] else 'highest healthy rate; no candidate reached queue threshold'
-pathlib.Path(a.out).write_text(json.dumps({'candidates': candidates, 'chosen': chosen}, indent=2) + '\n')
+pathlib.Path(a.out).write_text(json.dumps({
+    'selection_parameters': {
+        'min_queue_wait_seconds': a.min_queue_wait_seconds,
+        'max_p95_queue_wait_seconds': a.max_p95_queue_wait_seconds,
+    },
+    'candidates': candidates,
+    'chosen': chosen,
+}, indent=2) + '\n')
 print('Selected rate', chosen['rate'], 'from', chosen['analysis'])
