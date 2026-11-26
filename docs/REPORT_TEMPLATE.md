@@ -5,7 +5,7 @@
 | Field | Value |
 | --- | --- |
 | Git commit / dirty state | `TBD` |
-| Full-A100 hardware and driver | `TBD` |
+| Primary H200 `3g.71gb` hardware and driver | `TBD` |
 | Pinned SGLang / Torch / Transformers | `TBD` |
 | Dataset manifest hash | `TBD` |
 | Accepted development predictor hash | `TBD` |
@@ -28,4 +28,4 @@ State whether every policy used the same frozen trace, budget, model revision, a
 
 ## Limitations
 
-Record any deviations from the protocol, missing telemetry, model/server changes, queue effects, or hardware differences. Do not generalize 20 GB MIG smoke results into full-A100 scheduler findings.
+Record any deviations from the protocol, missing telemetry, model/server changes, queue effects, or hardware differences. Do not generalize historical 20 GB A100 MIG smoke results into H200 scheduler findings.

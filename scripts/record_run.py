@@ -43,6 +43,7 @@ parser.add_argument('--out', required=True, type=pathlib.Path)
 parser.add_argument('--kind', required=True)
 parser.add_argument('--status', choices=('planned', 'completed', 'failed'), required=True)
 parser.add_argument('--config', required=True)
+parser.add_argument('--platform-config', default='configs/platform.json')
 parser.add_argument('--trace')
 parser.add_argument('--predictor')
 parser.add_argument('--pilot-selection')
@@ -66,6 +67,7 @@ record = {
                 'sglang': version('sglang'), 'torch': version('torch'), 'transformers': version('transformers')},
     'slurm': {key: os.environ.get(key) for key in ('SLURM_JOB_ID', 'SLURM_JOB_NAME', 'SLURM_NODELIST', 'SLURM_SUBMIT_DIR')},
     'config': input_record(config_path),
+    'platform_config': input_record(args.platform_config),
     'dependency_lock': input_record(args.dependency_lock),
     'dataset_manifest': input_record(args.dataset_manifest),
     'policy': args.policy,

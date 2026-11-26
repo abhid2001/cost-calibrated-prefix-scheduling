@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source from an A100 Slurm job. Sets up a constrained, patched live engine.
+# Source from the primary H200 Slurm job. Sets up a constrained, patched live engine.
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:?submit from scheduler directory}"

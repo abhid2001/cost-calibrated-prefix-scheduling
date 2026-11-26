@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Fail early when an experiment lacks immutable inputs or a valid full-A100 setup."""
+"""Fail early when an experiment lacks immutable inputs or the primary H200 setup."""
 import argparse
 import importlib.metadata
 import json
 import math
 import pathlib
-import subprocess
 import sys
 
 
@@ -17,11 +16,13 @@ def require(path, description):
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--mode', choices=('pilot', 'matrix'), required=True)
+parser.add_argument('--mode', choices=('foundation', 'pilot', 'matrix'), required=True)
 parser.add_argument('--config', default='configs/foundation.json')
+parser.add_argument('--platform-config', default='configs/platform.json')
 parser.add_argument('--predictor')
 parser.add_argument('--pilot-selection')
-parser.add_argument('--require-full-a100', action='store_true')
+parser.add_argument('--require-primary-gpu', action='store_true')
+parser.add_argument('--hardware-json', help='Use saved visible-device data for an offline preflight check')
 args = parser.parse_args()
 
 config_path = require(args.config, 'configuration')
@@ -47,12 +48,32 @@ if args.mode == 'matrix':
         raise SystemExit('Pilot selection lacks a positive finite chosen rate')
 if importlib.metadata.version('sglang') != '0.5.10.post1':
     raise SystemExit('Pinned SGLang 0.5.10.post1 is required')
+platform_config = require(args.platform_config, 'platform configuration')
+platform_spec = json.loads(platform_config.read_text())
+for key in ('name', 'partition', 'qos', 'gres', 'gpu_name_contains', 'min_memory_mib'):
+    if key not in platform_spec:
+        raise SystemExit('Platform configuration lacks ' + key)
 hardware = None
-if args.require_full_a100:
-    try:
-        hardware = subprocess.check_output(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'], text=True).strip().splitlines()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise SystemExit('Cannot inspect GPU for full-A100 preflight: %s' % exc)
-    if len(hardware) != 1 or 'A100' not in hardware[0] or int(hardware[0].split(',')[1].split()[0]) < 39000:
-        raise SystemExit('Full-A100 preflight requires exactly one 40 GB A100: %s' % hardware)
-print(json.dumps({'preflight': 'passed', 'mode': args.mode, 'config': str(config_path), 'hardware': hardware}, sort_keys=True))
+if args.require_primary_gpu:
+    if args.hardware_json:
+        hardware = json.loads(require(args.hardware_json, 'hardware record').read_text())
+    else:
+        try:
+            import torch
+        except ImportError as exc:
+            raise SystemExit('Cannot inspect primary GPU without torch: %s' % exc)
+        if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
+            raise SystemExit('Primary platform requires exactly one Slurm-visible CUDA device; found %s' % torch.cuda.device_count())
+        properties = torch.cuda.get_device_properties(0)
+        hardware = {'name': properties.name,
+                    'memory_mib': properties.total_memory // (1024 * 1024),
+                    'cuda_version': torch.version.cuda}
+    if not isinstance(hardware, dict):
+        raise SystemExit('Hardware record must be an object')
+    name, memory = hardware.get('name'), hardware.get('memory_mib')
+    if not isinstance(name, str) or not isinstance(memory, int) or platform_spec['gpu_name_contains'] not in name or memory < platform_spec['min_memory_mib']:
+        raise SystemExit('%s preflight requires one %s device with at least %s MiB; found %s' %
+                         (platform_spec['name'], platform_spec['gpu_name_contains'], platform_spec['min_memory_mib'], hardware))
+print(json.dumps({'preflight': 'passed', 'mode': args.mode, 'config': str(config_path),
+                  'platform_config': str(platform_config), 'platform': platform_spec['name'],
+                  'hardware': hardware}, sort_keys=True))

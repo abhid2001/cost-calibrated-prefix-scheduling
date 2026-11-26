@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prefix-matrix
-#SBATCH --partition=aa100
+#SBATCH --partition=ah200
 #SBATCH --qos=gpu-normal
-#SBATCH --gres=gpu:a100-40gb:1
+#SBATCH --gres=gpu:h200_3g.71gb:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -17,12 +17,11 @@ source "${SLURM_SUBMIT_DIR:?}/scripts/live_experiment_common.sh"
 OUT="${MATRIX_OUT:-$PWD/results/matrix-${SLURM_JOB_ID}}"
 mkdir -p "$OUT"
 trap stop_live_server EXIT
-"$PY" scripts/preflight_experiment.py --mode matrix --predictor "$DEVELOPMENT_PREDICTOR" --pilot-selection "$PILOT_SELECTION" --require-full-a100 > "$OUT/preflight.json"
+"$PY" scripts/preflight_experiment.py --mode matrix --predictor "$DEVELOPMENT_PREDICTOR" --pilot-selection "$PILOT_SELECTION" --require-primary-gpu > "$OUT/preflight.json"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
-"$PY" -c 'import csv,sys; rows=list(csv.reader(open(sys.argv[1]))); assert len(rows)==1 and "A100" in rows[0][0] and int(rows[0][1].split()[0])>=39000, rows' "$OUT/gpu.csv"
 scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
 "$PY" -m pip freeze > "$OUT/installed-requirements.txt"
-cp configs/foundation.json data/manifest.json "$OUT/"
+cp configs/foundation.json configs/platform.json data/manifest.json "$OUT/"
 cp "$DEVELOPMENT_PREDICTOR" "$OUT/development-predictor.json"
 VALIDATION="$(dirname "$DEVELOPMENT_PREDICTOR")/validation.json"
 test -f "$VALIDATION" || { echo 'Missing predictor validation.json' >&2; exit 1; }

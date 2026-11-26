@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prefix-reasoning
-#SBATCH --partition=aa100
+#SBATCH --partition=ah200
 #SBATCH --qos=gpu-normal
-#SBATCH --gres=gpu:a100-40gb:1
+#SBATCH --gres=gpu:h200_3g.71gb:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

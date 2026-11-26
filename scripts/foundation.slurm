@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=prefix-foundation
-#SBATCH --partition=aa100
+#SBATCH --partition=ah200
 #SBATCH --qos=gpu-normal
-#SBATCH --gres=gpu:a100-40gb:1
+#SBATCH --gres=gpu:h200_3g.71gb:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -26,31 +26,30 @@ source "$PWD/scripts/python_headers.sh"
 test -x "$PY" || { echo 'Run scripts/setup_env.sh first' >&2; exit 1; }
 test -f data/development_questions.jsonl || { echo 'Run scripts/prepare_data.py first' >&2; exit 1; }
 OUT="results/foundation-${SLURM_JOB_ID}"; mkdir -p "$OUT"
+"$PY" scripts/preflight_experiment.py --mode foundation --require-primary-gpu > "$OUT/preflight.json"
 PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 URL="http://127.0.0.1:$PORT"
 nvidia-smi | tee "$OUT/nvidia-smi.txt"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
-"$PY" - "$OUT/hardware-validation.json" "${FOUNDATION_ALLOW_H200:-0}" <<'PY'
+"$PY" - "$OUT/hardware-validation.json" configs/platform.json <<'PY'
 import json, sys, torch
-allow_h200 = sys.argv[2] == '1'
+platform = json.load(open(sys.argv[2]))
 if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
     raise SystemExit('Expected exactly one Slurm-visible CUDA device; found ' + str(torch.cuda.device_count()))
 properties = torch.cuda.get_device_properties(0)
 name = properties.name
 memory_mib = properties.total_memory // (1024 * 1024)
-if 'A100' in name and memory_mib >= 39000:
-    profile = 'full-a100'
-elif allow_h200 and 'H200' in name and memory_mib >= 70000:
-    profile = 'h200-3g.71gb-compatibility'
-else:
-    raise SystemExit('Expected one full A100 of at least 40 GB. Set FOUNDATION_ALLOW_H200=1 only for an H200 slice of at least 70 GB; found: ' + name + ' with ' + str(memory_mib) + ' MiB')
-json.dump({'profile': profile, 'name': name, 'memory_mib': memory_mib, 'cuda_version': torch.version.cuda}, open(sys.argv[1], 'w'), indent=2)
+if platform['gpu_name_contains'] not in name or memory_mib < platform['min_memory_mib']:
+    raise SystemExit('Expected primary ' + platform['name'] + ' with one ' + platform['gpu_name_contains'] + ' device of at least ' + str(platform['min_memory_mib']) + ' MiB; found: ' + name + ' with ' + str(memory_mib) + ' MiB')
+profile = platform['name']
+json.dump({'profile': profile, 'name': name, 'memory_mib': memory_mib, 'cuda_version': torch.version.cuda, 'platform_config': platform}, open(sys.argv[1], 'w'), indent=2)
 print('Validated Slurm-visible hardware profile:', profile, name, str(memory_mib) + ' MiB')
 PY
 scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
 "$PY" -m pip freeze > "$OUT/installed-requirements.txt"
 cp configs/foundation.json "$OUT/config.json"
-printf '%s\n' "${FOUNDATION_ALLOW_H200:+H200 compatibility mode requested}" > "$OUT/run-mode.txt"
+cp configs/platform.json "$OUT/platform.json"
+printf '%s\n' 'Primary H200 3g.71gb platform' > "$OUT/run-mode.txt"
 "$PY" -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct \
   --revision a09a35458c702b33eeacc393d103063234e8bc28 --dtype bfloat16 \
   --host 127.0.0.1 --port "$PORT" --max-running-requests 1 --mem-fraction-static 0.80 \

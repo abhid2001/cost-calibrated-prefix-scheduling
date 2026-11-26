@@ -1,10 +1,10 @@
 # Cost-Calibrated Prefix Scheduling
 
-An experimental LLM inference project that studies whether estimating the GPU prefill time saved by KV-cache reuse can improve scheduling for reasoning workloads. The project uses Qwen2.5-7B-Instruct, GSM8K, SGLang, and a single NVIDIA A100.
+An experimental LLM inference project that studies whether estimating the GPU prefill time saved by KV-cache reuse can improve scheduling for reasoning workloads. The project uses Qwen2.5-7B-Instruct, GSM8K, SGLang, and one NVIDIA H200 `3g.71gb` MIG slice as its primary experiment platform.
 
 The code includes direct and chain-of-thought (CoT) answers, three-sample self-consistency, a bounded Tree of Thoughts (ToT) controller, and standalone FCFS, k-LPM, and calibrated ranking policies. The experiment compares answer quality and runtime under fixed reasoning budgets.
 
-**Project status:** The reasoning runners and standalone policies have local tests. An interactive 20 GB A100 MIG smoke test completed direct and CoT requests and verified prefix-cache reuse. The full 40 GB foundation job has not yet passed. Opt-in GPU prefill telemetry, real-prompt held-out calibration, and the constrained live FCFS, k-LPM, calibrated, and dependency-aware paths have passed interactive smoke tests. Scheduler experiments are still in progress. No scheduler performance results have been established.
+**Project status:** The reasoning runners and standalone policies have local tests. The H200 foundation run completed model loading, a fresh request, matching-prefix cache reuse, and Direct/CoT runners. Opt-in GPU prefill telemetry, real-prompt held-out calibration, and constrained live FCFS, k-LPM, calibrated, and dependency-aware paths have passed smoke tests. The H200 calibration, rate pilot, and primary matrix remain to be run; no scheduler performance results have been established.
 
 ---
 
@@ -19,15 +19,15 @@ scheduler/
 ├── scripts/
 │   ├── setup_env.sh                 # Create the project environment
 │   ├── prepare_data.py              # Prepare GSM8K questions and labels
-│   ├── foundation.slurm             # A100 model and cache-reuse check
+│   ├── foundation.slurm             # Primary H200 model and cache-reuse check
 │   ├── run_questions.py             # Direct and CoT inference
 │   ├── run_reasoning.py             # Self-consistency and bounded ToT
 │   ├── prepare_trace.py             # Generate reproducible arrivals
 │   ├── load_reasoning_trace.py      # Concurrent materialized-DAG live workload driver
 │   ├── collect_calibration.py       # Collect instrumented prefill timings
 │   ├── fit_calibration.py           # Fit and validate the predictor
-│   ├── calibration.slurm             # Full-A100 development-only calibration
-│   ├── pilot.slurm                  # Pilot workload on an A100
+│   ├── calibration.slurm             # H200 development-only calibration
+│   ├── pilot.slurm                  # Pilot workload on the H200 slice
 │   ├── reasoning_comparison.slurm   # Four-mode comparison
 │   └── scheduler_matrix.slurm       # Reserved scheduler-matrix entrypoint
 ├── src/prefix_scheduler/            # Request records, controllers, and policies
@@ -79,7 +79,7 @@ python -m unittest discover -s tests -v
 
 These tests exercise parsing, request states, reasoning dependencies, scheduling choices, and calibration logic without a GPU.
 
-### 4. Check the Model and Prefix Cache on an A100
+### 4. Check the Model and Prefix Cache on the Primary H200 Slice
 
 On CURC Alpine, submit the foundation job from the repository root with an eligible allocation account:
 
@@ -88,11 +88,9 @@ module load slurm/alpine
 sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
 ```
 
-The job requests one full 40 GB A100, launches SGLang, sends the same tokenized prompt twice, and checks the engine's cached-token telemetry. It then runs development questions in direct and CoT modes. Results and logs are saved in `results/foundation-<job-id>/`. The pinned model must be available in the project Hugging Face cache or downloadable from the compute node.
+The job requests one H200 `3g.71gb` slice, launches SGLang, sends the same tokenized prompt twice, and checks the engine's cached-token telemetry. It then runs development questions in direct and CoT modes. Results and logs are saved in `results/foundation-<job-id>/`. The pinned model must be available in the project Hugging Face cache or downloadable from the compute node. `configs/platform.json` is the source of truth for its Slurm request and visible-device validation.
 
-For a 20 GB A100 MIG interactive smoke test, run `scripts/interactive_foundation.sh` from an existing allocation. This uses a smaller KV cache and disables CUDA graphs; it is not equivalent to the full 40 GB experiment configuration. On Alpine, the script selects GCC 10 and its C++ runtime for CUDA JIT compilation and keeps TVM's build cache under the project directory.
-
-An H200 `3g.71gb` interactive allocation can run the same foundation pipeline only as a compatibility check. Set `FOUNDATION_ALLOW_H200=1`; its result is labeled `h200-3g.71gb-compatibility` and cannot replace the required full-A100 foundation result or be combined with the A100 experiment matrix.
+The historical 20 GB A100 MIG interactive scripts remain smoke-test tools. They use a smaller KV cache and are not comparable to, or combinable with, the H200 calibration, pilot, or matrix. On Alpine, the scripts select GCC 10 and its C++ runtime for CUDA JIT compilation and keep TVM's build cache under the project directory.
 
 ### 5. Run Reasoning Workloads
 
@@ -126,9 +124,9 @@ python scripts/analyze_run.py --run results/mixed-load \
 
 The runner materializes each complete graph before its question arrives: one Direct node, one CoT node, three self-consistency samples, or all seven bounded-ToT nodes. It dispatches every ready node through a bounded concurrent HTTP executor; a child becomes ready only after its recorded parents complete, while parent failure recursively marks descendants failed without sending them to the engine. Request, question, and `events.jsonl` logs preserve IDs, dependencies, state transitions, and client timestamps.
 
-### 7. Run the Full-A100 Foundation Check
+### 7. Run the Primary H200 Foundation Check
 
-The foundation script now uses the same project-local compiler, C++ runtime, caches, conservative memory fraction, and no-overlap/no-chunk constraints as the validated live path. It must run on a full 40 GB A100; the 20 GB `gpu-testing` MIG QoS cannot validate it.
+The foundation script uses the same project-local compiler, C++ runtime, caches, conservative memory fraction, and no-overlap/no-chunk constraints as the live path. It validates exactly one Slurm-visible H200 device with at least 70,000 MiB, not the host-wide device list.
 
 ```bash
 sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
@@ -136,7 +134,7 @@ sbatch --account=YOUR_ACCOUNT scripts/foundation.slurm
 
 ### 8. Run the Pilot
 
-After the foundation job succeeds, collect an accepted full-A100 development predictor:
+After the foundation job succeeds, collect an accepted H200 development predictor:
 
 ```bash
 sbatch --account=YOUR_ACCOUNT scripts/calibration.slurm
@@ -170,7 +168,7 @@ Each policy receives the same trace hash, seed, token budget, server constraints
 
 The standalone policies use an oldest-first admission followed by `k - 1` cache-ranked admissions, with `k = 4` by default. The k-LPM implementation offers cached-token ratio and matched-token count scores; the ratio is a provisional interpretation of the paper's cache-hit signal. Ties are resolved by ready time and request ID. The pinned SGLang LPM implementation instead sorts by matched-token count and preserves existing queue order for equal keys.
 
-The calibrated policy uses a lookup predictor fitted from paired cold and warm prefill timings. If a prediction is unavailable, it falls back to the baseline score. `interactive_calibration.sh` builds varied tokenized GSM8K chat prompts (zero, two, and four real demonstration questions), repeats cold/warm measurements, and accepts a predictor only after disjoint held-out prompt IDs satisfy the configured coverage, MAE, and ranking-error gate. This validates a constrained MIG predictor; repeat calibration on the final workload and full A100 before reporting scheduler performance.
+The calibrated policy uses a lookup predictor fitted from paired cold and warm prefill timings. If a prediction is unavailable, it falls back to the baseline score. `interactive_calibration.sh` builds varied tokenized GSM8K chat prompts (zero, two, and four real demonstration questions), repeats cold/warm measurements, and accepts a predictor only after disjoint held-out prompt IDs satisfy the configured coverage, MAE, and ranking-error gate. This validates a constrained MIG predictor; fit and accept a fresh predictor on the final H200 development workload before reporting scheduler performance.
 
 An optional `dependency-aware` policy adds a configurable per-unlocked-child bonus (in milliseconds) to the predicted saving on cache-ranked admissions. It keeps the same oldest-first cycle and falls back to the baseline for the whole choice when prediction or dependency information is unavailable. The workload driver atomically publishes its complete materialized graph (IDs, parent IDs, and states) to the engine hook. The hook counts a blocked child only if every other parent completed, logs the count and dependency score, and falls back uniformly if its predictor or graph snapshot is unavailable. It is an optional fourth policy, not a replacement for the three required policies.
 
@@ -192,7 +190,7 @@ PREFIX_ADMISSION_POLICY=calibrated PREFIX_PREDICTOR_PATH=/absolute/path/to/predi
   bash scripts/interactive_admission.sh
 ```
 
-Run the script only inside the documented interactive A100 allocation. It primes a real prefix and submits contending prompts with different matched-prefix lengths. The JSONL log records every candidate's live radix-cache match, score, fairness slot, ranked order, and the request actually accepted by SGLang. The validator independently recomputes each ranking, verifies the oldest-first cycle advances only after an actual admission, and compares each selected request's log entry with SGLang's `cached_tokens` response telemetry. The saved `responses.json` and `admissions.jsonl` are the run evidence. This establishes scheduling correctness under the stated constraints; it is not yet a performance result or a general multi-request admission controller.
+The interactive A100 script is a historical smoke-test path. The H200 Slurm pilot and matrix use the same live hook under the primary platform configuration. The JSONL log records every candidate's live radix-cache match, score, fairness slot, ranked order, and the request actually accepted by SGLang. The validator independently recomputes each ranking, verifies the oldest-first cycle advances only after an actual admission, and compares each selected request's log entry with SGLang's `cached_tokens` response telemetry. The saved `responses.json` and `admissions.jsonl` are the run evidence. This establishes scheduling correctness under the stated constraints; it is not yet a performance result or a general multi-request admission controller.
 
 To run a materialized four-mode workload through that same patched server, create a mixed trace and set `WORKLOAD_TRACE` when launching the interactive script:
 

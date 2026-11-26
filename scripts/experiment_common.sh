@@ -12,10 +12,10 @@ test -x "$PY" || { echo 'Missing project venv' >&2; exit 1; }
 test -f data/manifest.json || { echo 'Missing dataset manifest' >&2; exit 1; }
 OUT="${OUT:-$PWD/results/${SLURM_JOB_NAME}-${SLURM_JOB_ID}}"; mkdir -p "$OUT"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
-"$PY" -c 'import csv,sys; r=list(csv.reader(open(sys.argv[1]))); assert len(r)==1 and "A100" in r[0][0] and int(r[0][1].split()[0])>=39000, r' "$OUT/gpu.csv"
+"$PY" scripts/preflight_experiment.py --mode pilot --require-primary-gpu > "$OUT/preflight.json"
 scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
 "$PY" -m pip freeze > "$OUT/installed-requirements.txt"
-cp configs/foundation.json data/manifest.json "$OUT/"
+cp configs/foundation.json configs/platform.json data/manifest.json "$OUT/"
 PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 URL="http://127.0.0.1:$PORT"
 "$PY" -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct --revision a09a35458c702b33eeacc393d103063234e8bc28 --dtype bfloat16 --host 127.0.0.1 --port "$PORT" --max-running-requests 1 --schedule-policy fcfs > "$OUT/server.log" 2>&1 &

@@ -1,0 +1,10 @@
+{
+  "name": "h200-3g.71gb",
+  "partition": "ah200",
+  "qos": "gpu-normal",
+  "gres": "gpu:h200_3g.71gb:1",
+  "gpu_name_contains": "H200",
+  "min_memory_mib": 70000,
+  "role": "primary experiment platform",
+  "notes": "One Slurm-visible H200 MIG 3g.71gb device. Physical-GPU nvidia-smi output may list devices that are not visible to this job; validation uses PyTorch CUDA visibility."
+}
