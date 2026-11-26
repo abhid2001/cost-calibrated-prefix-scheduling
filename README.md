@@ -4,7 +4,7 @@ An experimental LLM inference project that studies whether estimating the GPU pr
 
 The code includes direct and chain-of-thought (CoT) answers, three-sample self-consistency, a bounded Tree of Thoughts (ToT) controller, and standalone FCFS, k-LPM, and calibrated ranking policies. The experiment compares answer quality and runtime under fixed reasoning budgets.
 
-**Project status:** The reasoning runners and standalone policies have local tests. The H200 foundation run completed model loading, a fresh request, matching-prefix cache reuse, and Direct/CoT runners. Opt-in GPU prefill telemetry, real-prompt held-out calibration, and constrained live FCFS, k-LPM, calibrated, and dependency-aware paths have passed smoke tests. The H200 calibration, rate pilot, and primary matrix remain to be run; no scheduler performance results have been established.
+**Project status:** The primary H200 foundation, development-only calibration, mixed-mode rate pilot, and four-policy evaluation matrix are complete. All matrix policies completed 100 questions and 300 live admissions with no request failures or fairness-cycle errors. The measured results and their limitations are in [`docs/RESULTS_SUMMARY.md`](docs/RESULTS_SUMMARY.md) and [`docs/H200_EXPERIMENT_REPORT.md`](docs/H200_EXPERIMENT_REPORT.md).
 
 ---
 
@@ -37,6 +37,16 @@ scheduler/
 
 Model weights, caches, the virtual environment, generated datasets, and results stay local and are excluded from Git.
 
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [Dependencies and platform requirements](docs/DEPENDENCIES.md) | Supported H200 environment, pinned dependencies, local-storage behavior, and verification |
+| [Experiment protocol](docs/EXPERIMENT_PROTOCOL.md) | Reproducible calibration, pilot, matrix, resume, and analysis procedure |
+| [Results summary](docs/RESULTS_SUMMARY.md) | Concise foundation, calibration, pilot, and matrix results |
+| [Detailed H200 report](docs/H200_EXPERIMENT_REPORT.md) | Provenance, metrics, interpretation, and limitations for the completed primary run |
+| [Report template](docs/REPORT_TEMPLATE.md) | Reusable reporting structure for a future run |
+
 ---
 
 ## Quickstart
@@ -61,7 +71,7 @@ export TORCH_EXTENSIONS_DIR="$PWD/.cache/torch-extensions" FLASHINFER_WORKSPACE_
 export TVM_FFI_CACHE_DIR="$PWD/.cache/tvm-ffi"
 ```
 
-The setup pins SGLang `0.5.10.post1` and `datasets` `3.6.0`. Model and dataset revisions are recorded in `configs/foundation.json`. `configs/environment-snapshot.txt` records one resolved environment; it is not a GPU-validated lockfile. On systems without Python development headers, GPU jobs also require matching headers: `scripts/python_headers.sh` checks the system include directory and can use the project-local `.cache/python-devel/usr/include/python3.11` fallback. For the current Alpine Python 3.11.13 environment, that fallback was extracted from the matching Rocky Linux `python3.11-devel-3.11.13-2.el8_10.x86_64` RPM and includes the system `pyconfig-64.h`. The cache is not tracked; provision matching headers on a fresh setup.
+The setup pins SGLang `0.5.10.post1` and `datasets` `3.6.0`, constrains transitive packages with `configs/environment-snapshot.txt`, and writes the resolved installation to `configs/installed-requirements.txt`. Model and dataset revisions are recorded in `configs/foundation.json`; the machine-readable H200 Slurm request is `configs/platform.json`. See [Dependencies and platform requirements](docs/DEPENDENCIES.md) for the supported platform, compiler/header prerequisites, local-cache behavior, and verification steps.
 
 ### 2. Prepare GSM8K
 
@@ -173,9 +183,9 @@ The calibrated policy uses a lookup predictor fitted from paired cold and warm p
 An optional `dependency-aware` policy adds a configurable per-unlocked-child bonus (in milliseconds) to the predicted saving on cache-ranked admissions. It keeps the same oldest-first cycle and falls back to the baseline for the whole choice when prediction or dependency information is unavailable. The workload driver atomically publishes its complete materialized graph (IDs, parent IDs, and states) to the engine hook. The hook counts a blocked child only if every other parent completed, logs the count and dependency score, and falls back uniformly if its predictor or graph snapshot is unavailable. It is an optional fourth policy, not a replacement for the three required policies.
 
 
-`scripts/install_prefill_instrumentation.py` applies an opt-in patch to the pinned SGLang 0.5.10.post1 environment and saves the original engine files in the ignored `patches/sglang-original/` directory. Enable it with `PREFIX_GPU_PREFILL_TIMING=1` and run with one GPU, `--max-running-requests 1`, `--chunked-prefill-size -1`, and `--disable-overlap-schedule`; incompatible settings fail. The patch records synchronized CUDA events around the model forward on its current stream, before token sampling, and exposes `meta_info.prefill_gpu_ms` in responses. Streaming telemetry has been verified on the 20 GB MIG configuration. Event timing includes GPU work and stream idle gaps within that forward interval; it is not client TTFT. CUDA graph and piecewise graph settings must remain fixed for paired measurements.
+`scripts/install_prefill_instrumentation.py` applies an opt-in patch to the pinned SGLang 0.5.10.post1 environment and saves the original engine files in the ignored `patches/sglang-original/` directory. Enable it with `PREFIX_GPU_PREFILL_TIMING=1` and run with one GPU, `--max-running-requests 1`, `--chunked-prefill-size -1`, and `--disable-overlap-schedule`; incompatible settings fail. The patch records synchronized CUDA events around the model forward on its current stream, before token sampling, and exposes `meta_info.prefill_gpu_ms` in responses. Streaming telemetry was first smoke-tested on 20 GB MIG and was subsequently required for every H200 matrix request. Event timing includes GPU work and stream idle gaps within that forward interval; it is not client TTFT. CUDA graph and piecewise graph settings must remain fixed for paired measurements.
 
-`scripts/interactive_prefill.sh` launches a dedicated 20 GB MIG server with those constraints and validates cold and warm telemetry. One interactive smoke test passed with 700 cached tokens; these individual timings are not a performance comparison. `collect_calibration.py` flushes the server cache between paired measurements, so use only a dedicated server. A preliminary 20 GB MIG calibration and held-out validation have been run; more varied prompts and repeated measurements are needed before relying on the predictor.
+`scripts/interactive_prefill.sh` launches a dedicated 20 GB MIG server with those constraints and validates cold and warm telemetry. One interactive smoke test passed with 700 cached tokens; these individual timings are not a performance comparison. `collect_calibration.py` flushes the server cache between paired measurements, so use only a dedicated server. The primary H200 calibration used varied real prompts and repeated cold/warm pairs; its accepted held-out predictor and measured error are documented in the [results summary](docs/RESULTS_SUMMARY.md).
 
 ### Live admission validation
 
@@ -190,7 +200,7 @@ PREFIX_ADMISSION_POLICY=calibrated PREFIX_PREDICTOR_PATH=/absolute/path/to/predi
   bash scripts/interactive_admission.sh
 ```
 
-The interactive A100 script is a historical smoke-test path. The H200 Slurm pilot and matrix use the same live hook under the primary platform configuration. The JSONL log records every candidate's live radix-cache match, score, fairness slot, ranked order, and the request actually accepted by SGLang. The validator independently recomputes each ranking, verifies the oldest-first cycle advances only after an actual admission, and compares each selected request's log entry with SGLang's `cached_tokens` response telemetry. The saved `responses.json` and `admissions.jsonl` are the run evidence. This establishes scheduling correctness under the stated constraints; it is not yet a performance result or a general multi-request admission controller.
+The interactive A100 script is a historical smoke-test path. The H200 Slurm pilot and matrix use the same live hook under the primary platform configuration. The JSONL log records every candidate's live radix-cache match, score, fairness slot, ranked order, and the request actually accepted by SGLang. The validator independently recomputes each ranking, verifies the oldest-first cycle advances only after an actual admission, and compares each selected request's log entry with SGLang's `cached_tokens` response telemetry. The saved `responses.json` and `admissions.jsonl` are the run evidence. The completed H200 matrix evaluates this constrained integration; it is not a general multi-request serving controller, and its single-run results should not be generalized beyond the documented setting.
 
 To run a materialized four-mode workload through that same patched server, create a mixed trace and set `WORKLOAD_TRACE` when launching the interactive script:
 
