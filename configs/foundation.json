@@ -10,7 +10,7 @@
   "evaluation_count": 100,
   "dtype": "bfloat16",
   "sglang_version": "0.5.10.post1",
-  "max_new_tokens": 256,
+  "max_new_tokens": 512,
   "temperature": 0,
   "request_timeout_seconds": 300
 }
