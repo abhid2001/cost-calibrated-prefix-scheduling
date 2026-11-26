@@ -30,12 +30,27 @@ PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); prin
 URL="http://127.0.0.1:$PORT"
 nvidia-smi | tee "$OUT/nvidia-smi.txt"
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader > "$OUT/gpu.csv"
-if ! "$PY" -c 'import csv,sys; rows=list(csv.reader(open(sys.argv[1]))); assert len(rows)==1 and "A100" in rows[0][0] and int(rows[0][1].split()[0])>=39000, rows' "$OUT/gpu.csv"; then
-  echo 'Expected one full A100 of at least 40 GB, not a MIG device' >&2; exit 1
-fi
+"$PY" - "$OUT/hardware-validation.json" "${FOUNDATION_ALLOW_H200:-0}" <<'PY'
+import json, sys, torch
+allow_h200 = sys.argv[2] == '1'
+if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
+    raise SystemExit('Expected exactly one Slurm-visible CUDA device; found ' + str(torch.cuda.device_count()))
+properties = torch.cuda.get_device_properties(0)
+name = properties.name
+memory_mib = properties.total_memory // (1024 * 1024)
+if 'A100' in name and memory_mib >= 39000:
+    profile = 'full-a100'
+elif allow_h200 and 'H200' in name and memory_mib >= 70000:
+    profile = 'h200-3g.71gb-compatibility'
+else:
+    raise SystemExit('Expected one full A100 of at least 40 GB. Set FOUNDATION_ALLOW_H200=1 only for an H200 slice of at least 70 GB; found: ' + name + ' with ' + str(memory_mib) + ' MiB')
+json.dump({'profile': profile, 'name': name, 'memory_mib': memory_mib, 'cuda_version': torch.version.cuda}, open(sys.argv[1], 'w'), indent=2)
+print('Validated Slurm-visible hardware profile:', profile, name, str(memory_mib) + ' MiB')
+PY
 scontrol show job "$SLURM_JOB_ID" > "$OUT/slurm-job.txt"
 "$PY" -m pip freeze > "$OUT/installed-requirements.txt"
 cp configs/foundation.json "$OUT/config.json"
+printf '%s\n' "${FOUNDATION_ALLOW_H200:+H200 compatibility mode requested}" > "$OUT/run-mode.txt"
 "$PY" -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct \
   --revision a09a35458c702b33eeacc393d103063234e8bc28 --dtype bfloat16 \
   --host 127.0.0.1 --port "$PORT" --max-running-requests 1 --mem-fraction-static 0.80 \

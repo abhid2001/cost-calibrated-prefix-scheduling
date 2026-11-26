@@ -92,6 +92,8 @@ The job requests one full 40 GB A100, launches SGLang, sends the same tokenized 
 
 For a 20 GB A100 MIG interactive smoke test, run `scripts/interactive_foundation.sh` from an existing allocation. This uses a smaller KV cache and disables CUDA graphs; it is not equivalent to the full 40 GB experiment configuration. On Alpine, the script selects GCC 10 and its C++ runtime for CUDA JIT compilation and keeps TVM's build cache under the project directory.
 
+An H200 `3g.71gb` interactive allocation can run the same foundation pipeline only as a compatibility check. Set `FOUNDATION_ALLOW_H200=1`; its result is labeled `h200-3g.71gb-compatibility` and cannot replace the required full-A100 foundation result or be combined with the A100 experiment matrix.
+
 ### 5. Run Reasoning Workloads
 
 With an SGLang server running at `http://127.0.0.1:30000`:
