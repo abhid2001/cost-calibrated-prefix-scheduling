@@ -36,4 +36,3 @@ Every policy used the same frozen trace, 512-token budget, model revision, accep
 - Predictor coverage during the live matrix was about 54–55%, so 124–127 admission decisions explicitly used baseline fallback.
 - The constrained server has one running request, disabled overlap/CUDA graphs, and unchunked prefill; results do not generalize to unrestricted serving.
 - Question accuracy reflects deterministic model outputs and the parser; it is not a scheduler-quality metric.
-- The full raw artifacts remain under `results/{calibration-36428342,pilot-36428342,matrix-36429334}/` and are intentionally ignored by Git; provenance records and this report identify their hashes.
