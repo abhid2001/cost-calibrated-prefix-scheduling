@@ -12,10 +12,13 @@ import re
 from .core import Request, now, parse_answer, prompt_for
 from .reasoning import seed_for
 
+# 'Selected: 2' on its own line => '2' (the evaluator's pick)
 SELECTED = re.compile(r"(?im)^\s*selected\s*:\s*([12])\s*$")
 
 
 class WorkloadGraph:
+    #essentially builds the dependency graph of a question
+    # One question's DAG: every Request node, by order (records) and by request_id (by_id)
     def __init__(self, question_id, question, mode, arrival, max_new_tokens):
         self.question_id = question_id
         self.question = question
@@ -26,6 +29,8 @@ class WorkloadGraph:
         self.by_id = {}
 
     def add(self, node, stage, parents=()):
+        #adds a request in the form of question_id mapped against request_id
+        # add('r1eval', 'candidate_evaluation', [c11, c12]) => Request 'q042:r1eval', blocked, fixed seed
         request_id = self.question_id + ':' + node
         request = Request(
             self.question_id, request_id, stage, self.arrival, now(),
@@ -38,9 +43,12 @@ class WorkloadGraph:
         return request
 
     def node(self, suffix):
+        # node('r1eval') => the Request 'q042:r1eval'
         return self.by_id[self.question_id + ':' + suffix]
 
     def messages_for(self, request):
+        #essentially induces randomness(temp=0.7) only in cases of self-consistency and ToT during generation phase
+        # => (chat messages, temperature); ToT prompts paste in parent outputs, so call only once parents completed
         """Build a request only after all of its logical parents completed."""
         if self.mode in ('direct', 'cot'):
             return prompt_for(self.question, self.mode), 0.0
@@ -74,12 +82,15 @@ class WorkloadGraph:
         raise ValueError('unknown graph stage: ' + request.stage)
 
     def _selected(self, round_no):
+        # => (winning candidate of that round, fell_back); unreadable verdict falls back to candidate 1
         evaluator = self.node('r%seval' % round_no)
         match = SELECTED.search(evaluator.output or '')
         return self.node('r%sc%s' % (round_no, match.group(1) if match else '1')), match is None
 
 
 def materialize(question_id, question, mode, arrival, max_new_tokens):
+    # direct/cot => 1 node | self_consistency => 3 independent samples | tot => 7 nodes:
+    # r1c1, r1c2 -> r1eval -> r2c1, r2c2 -> r2eval -> final
     """Create every DAG node before dispatch; all records begin blocked."""
     graph = WorkloadGraph(question_id, question, mode, arrival, max_new_tokens)
     if mode in ('direct', 'cot'):
@@ -101,6 +112,7 @@ def materialize(question_id, question, mode, arrival, max_new_tokens):
 
 
 def release(graph):
+    # blocked + all parents completed => ready | blocked + any parent failed => failed (repeats so failures cascade)
     """Advance blocked nodes after a state change; return ready and failed nodes.
 
     A descendant of an HTTP failure is never sent to the engine.  The loop
@@ -127,6 +139,7 @@ def release(graph):
 
 
 def question_result(graph):
+    # Reads the finished graph only (sends nothing): direct/cot parse one output, SC majority-votes 3, ToT parses 'final'
     """Compute the existing four-mode result from the final graph snapshot."""
     finished_at = max((request.finished_at for request in graph.records if request.finished_at), default=now())
     if graph.mode in ('direct', 'cot'):
