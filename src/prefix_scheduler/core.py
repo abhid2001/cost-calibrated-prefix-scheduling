@@ -20,12 +20,15 @@ class Request:
     stage: str
     question_arrival: str
     created_at: str
+    # parent_ids: request_ids that must complete before this request can run (edges of the question's DAG)
     parent_ids: list = dataclasses.field(default_factory=list)
     status: str = 'blocked'
     ready_at: Optional[str] = None
     # Client dispatch and engine admission are distinct.  The latter is only
     # populated when a live SGLang admission log is supplied by the runner.
+    # dispatched_at is when the request was fired to SGLang
     dispatched_at: Optional[str] = None
+    # admitted_at is when SGLang starts processing the request
     admitted_at: Optional[str] = None
     first_token_at: Optional[str] = None
     finished_at: Optional[str] = None
@@ -34,6 +37,7 @@ class Request:
     matched_prefix_tokens: Optional[int] = None
     predicted_saving_ms: Optional[float] = None
     sampling_seed: Optional[int] = None
+    # hard cap on generated output, in tokens (default 256)
     max_new_tokens: int = 256
     output: Optional[str] = None
     error: Optional[str] = None
@@ -52,15 +56,18 @@ class Request:
             self.dispatched_at = stamp
             # Compatibility for serial runners; the live workload replaces
             # this with the engine-side admission timestamp after log join.
+            # both dispatched_at and admitted_at are assigned the same timestamp initially for convenience, admitted_at is overwritten in load_reasoning_trace.py
             self.admitted_at = stamp
         if state in ('completed', 'failed'): self.finished_at = stamp
 
 
 NUMBER = re.compile(r'(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?![\w])')
 FINAL = re.compile(r'(?:final\s+answer\s*[:=]|####)\s*([^\n]+)', re.I)
+# '\boxed{ 31 }' => '31'
 BOXED = re.compile(r'\\boxed\s*\{\s*([^{}]+?)\s*\}', re.I)
 
 def normalize_number(text):
+    # ' $1,234.50 ' => '1234.5'   |   '18.00' => '18'   |   '-0' => '0'   |   '18 apples' => None
     """Return a canonical decimal string only for one whole numeric value."""
     value = text.strip().replace(',', '').replace('$', '')
     if not re.fullmatch(r'[-+]?(?:\d+(?:\.\d+)?|\.\d+)', value): return None
@@ -72,6 +79,7 @@ def normalize_number(text):
         return None
 
 def parse_answer(text):
+    # '...so Final answer: $18' => '18'   |   'x = \boxed{42}' => '42'   |   'Final answer: 18 or 20' => None   |   no answer => None
     text = text or ''
     matches = FINAL.findall(text)
     boxed = BOXED.findall(text)
@@ -81,6 +89,7 @@ def parse_answer(text):
     return normalize_number(numbers[0]) if len(numbers) == 1 else None
 
 def prompt_for(question, mode):
+    # picks the direct/CoT instruction, requires 'Final answer: <number>', returns [system, user] messages
     if mode == 'direct':
         instruction = 'Answer the math question directly without explaining your work.'
     elif mode == 'cot':
@@ -90,7 +99,9 @@ def prompt_for(question, mode):
             {'role': 'user', 'content': question}]
 
 def chat_token_ids(tokenizer, messages):
+    # [system, user] messages => Qwen chat template + assistant turn => flat token list, e.g. [151644, 8948, 198, ...]
     """Return a flat, JSON-serializable chat-token list across transformers versions."""
+    # tokenize=True returns token IDs (not text); add_generation_prompt=True appends the assistant turn
     tokens = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, return_dict=False)
     # `return_dict=False` handles current Transformers releases.  Normalize
     # older/fake tokenizers too, rather than sending a BatchEncoding or batch
@@ -107,6 +118,7 @@ def chat_token_ids(tokenizer, messages):
 
 
 def post_json(url, data, timeout=300):
+    # Non-streaming POST: {'input_ids': [...], 'sampling_params': {...}} => full JSON reply, e.g. {'text': ..., 'meta_info': {...}}
     request = urllib.request.Request(url, json.dumps(data).encode(), {'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
@@ -114,12 +126,15 @@ def post_json(url, data, timeout=300):
 
 def generate(url, input_ids, sampling_params, timeout=300, record=None, rid=None):
     """Stream native SGLang output and record client-observed TTFT when requested."""
+    # Streaming POST: token ids => ('3 + 5 = 8. Final answer: 8', {'cached_tokens': 41, ...})
+    # Stamps record.first_token_at on the first chunk with output; rid joins the engine admission log.
     body = {'input_ids': input_ids, 'sampling_params': sampling_params, 'stream': True}
     if rid is not None:
         body['rid'] = rid
     request = urllib.request.Request(url, json.dumps(body).encode(), {'Content-Type': 'application/json'})
     last = None
     metadata = {}
+    # read streamed chunks: reject bad JSON/errors, merge meta_info, stamp first_token_at, keep the last (full) text
     with urllib.request.urlopen(request, timeout=timeout) as response:
         for raw in response:
             line = raw.decode('utf-8').strip()
